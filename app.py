@@ -41,7 +41,7 @@ if not st.session_state.autenticado:
         scope="email profile",
         key="google_login",
         use_container_width=True,
-        extra_params={"prompt": "select_account", "hd": "usach.cl"}
+        extras_params={"prompt": "select_account", "hd": "usach.cl"}
     )
     
     if result and "token" in result:
