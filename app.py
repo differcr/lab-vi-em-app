@@ -106,7 +106,9 @@ with tab1:
         "Ib_Corriente_Bobinas": [0.0] * 5,
         "Parametro_Geometrico": [0.0] * 5
     })
-    
+    # --- LÍNEAS NUEVAS: Ajustar el contador numérico ---
+    df_vacio.index = range(1, len(df_vacio) + 1)
+    df_vacio.index.name = "Dato N°"
     # Editor de datos interactivo
     df_editado = st.data_editor(df_vacio, num_rows="dynamic", use_container_width=True)
     
