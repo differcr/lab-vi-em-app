@@ -203,7 +203,7 @@ with tab1:
                 conn.update(worksheet="Sheet1", data=df_actualizado)
                 st.info("Datos del lote respaldados en la base institucional.")
                     # Mostrar el error en rojo si es muy alto, o normal si es bajo
-                    if error_porcentual <= 15.0:
-                        col_res3.metric(label="Error Experimental", value=f"{error_porcentual:.2f} %", delta="Aceptable", delta_color="normal")
-                    else:
-                        col_res3.metric(label="Error Experimental", value=f"{error_porcentual:.2f} %", delta="Alta Desviación", delta_color="inverse")
+                if error_porcentual <= 15.0:
+                    col_res3.metric(label="Error Experimental", value=f"{error_porcentual:.2f} %", delta="Aceptable", delta_color="normal")
+                else:
+                    col_res3.metric(label="Error Experimental", value=f"{error_porcentual:.2f} %", delta="Alta Desviación", delta_color="inverse")
