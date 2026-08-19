@@ -113,14 +113,13 @@ with tab1:
     if st.button("Procesar Lote y Guardar", type="primary"):
         # Filtrar filas donde hayan ingresado datos reales (Voltaje > 0)
         df_validos = df_editado[df_editado["Va_Voltaje_Acelerador"] > 0].copy()
-        
         if df_validos.empty:
             st.warning("Debe ingresar al menos una medición válida (con Va > 0) para procesar.")
         else:
-           
             # MOTOR DE CÁLCULO FÍSICO 
-            
             valor_teorico = 1.758820e11 # C/kg
+            mu_0 = 4 * np.pi * 1e-7
+
             def calcular_em(row, eq, exp):
                 try:
                     V_medido = float(row.get('Va_Voltaje_Acelerador', 0) or 0)
@@ -162,7 +161,6 @@ with tab1:
             df_validos['e_m_Calculado'] = df_validos.apply(
                 lambda row: calcular_em(row, equipo, experimento), axis=1
             )
-            
             # 3. Propagación de Error Instrumental para cada medición
             termino_v = (delta_v / df_validos['Va_Voltaje_Acelerador'])**2
             termino_i = (2 * delta_i / df_validos['Ib_Corriente_Bobinas'])**2
