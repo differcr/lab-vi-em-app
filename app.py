@@ -120,6 +120,45 @@ with tab1:
             if va == 0 or ib == 0 or param_geometrico == 0:
                 st.warning("Alerta: Revise los datos, hay valores clave en cero.")
             else:
+                # ==========================================
+                # 1. MOTOR DE CÁLCULO FÍSICO
+                # ==========================================
+                e_m_calculado = None
+                error_porcentual = None
+                valor_teorico = 1.758820e11 # C/kg
+                mu_0 = 4 * np.pi * 1e-7
+
+                try:
+                    if "1 - PASCO" in equipo:
+                        # Constantes del equipo PASCO SE-9629
+                        N_espiras = 130
+                        R_bobina = 0.15
+                        B = (8 * mu_0 * N_espiras * ib) / (np.sqrt(125) * R_bobina)
+                        e_m_calculado = (2 * va) / ((B**2) * (param_geometrico**2))
+                        
+                    elif "2 - TELTRON Doble Cañón" in equipo:
+                        # ATENCIÓN: Reemplaza N_espiras y R_bobina con los de tu guía de laboratorio TELTRON
+                        N_espiras = 320   # Valor típico Teltron, ¡Verificar!
+                        R_bobina = 0.068  # Valor típico Teltron, ¡Verificar!
+                        B = (8 * mu_0 * N_espiras * ib) / (np.sqrt(125) * R_bobina)
+                        # Fórmula de deflexión magnética estándar
+                        e_m_calculado = (2 * va) / ((B**2) * (param_geometrico**2))
+                        
+                    elif "3 - TELTRON Thomson" in equipo:
+                        # ATENCIÓN: Inserta aquí la ecuación exacta de campos cruzados de tu guía
+                        # e_m_calculado = ... 
+                        pass 
+
+                    # Calcular el error si se obtuvo un valor
+                    if e_m_calculado is not None:
+                        error_porcentual = abs((e_m_calculado - valor_teorico) / valor_teorico) * 100
+
+                except Exception as e:
+                    st.error("Error matemático en el cálculo. Revise los parámetros ingresados.")
+
+                # ==========================================
+                # 2. GUARDADO EN GOOGLE SHEETS
+                # ==========================================
                 df_existente = conn.read()
                 
                 nueva_fila = pd.DataFrame([{
@@ -133,24 +172,30 @@ with tab1:
                     "Vb_Voltaje_Bobinas": vb if vb is not None else np.nan,
                     "Ib_Corriente_Bobinas": ib,
                     "Parametro_Geometrico": param_geometrico,
+                    # Opcional: También podemos guardar el cálculo en la nube directamente
+                    "e_m_Calculado": e_m_calculado if e_m_calculado else np.nan,
+                    "Error_Porcentual": error_porcentual if error_porcentual else np.nan,
                     "Observaciones": "Dato válido"
                 }])
                 
+                # Actualizar Sheets (Asegúrate de que Worksheet coincide con tu Excel, por ej "Hoja 1" o "Sheet1")
                 df_actualizado = pd.concat([df_existente, nueva_fila], ignore_index=True)
                 conn.update(worksheet="Sheet1", data=df_actualizado)
                 
-                st.success("¡Datos guardados correctamente en Google Sheets!")
-
-# --- PESTAÑA 2: DASHBOARD DE ANÁLISIS ---
-with tab2:
-    st.header("Análisis Histórico y Deriva Temporal")
-    
-    if st.button("Actualizar Datos desde la Nube"):
-        df = conn.read()
-        df = df.dropna(subset=['Va_Voltaje_Acelerador'])
-        
-        if not df.empty:
-            st.dataframe(df)
-            st.info("Visualización de datos históricos cargada con éxito.")
-        else:
-            st.info("Aún no hay datos históricos para analizar.")
+                # ==========================================
+                # 3. INTERFAZ DE RESULTADOS (FEEDBACK VISUAL)
+                # ==========================================
+                st.success("¡Datos guardados correctamente en la base institucional!")
+                
+                if e_m_calculado is not None:
+                    st.markdown("### Resultados Preliminares del Ensayo")
+                    col_res1, col_res2, col_res3 = st.columns(3)
+                    
+                    col_res1.metric(label="Relación e/m Obtenida", value=f"{e_m_calculado:.4e} C/kg")
+                    col_res2.metric(label="Valor Teórico", value=f"{valor_teorico:.4e} C/kg")
+                    
+                    # Mostrar el error en rojo si es muy alto, o normal si es bajo
+                    if error_porcentual <= 15.0:
+                        col_res3.metric(label="Error Experimental", value=f"{error_porcentual:.2f} %", delta="Aceptable", delta_color="normal")
+                    else:
+                        col_res3.metric(label="Error Experimental", value=f"{error_porcentual:.2f} %", delta="Alta Desviación", delta_color="inverse")
