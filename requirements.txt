@@ -4,3 +4,6 @@ numpy
 st-gsheets-connection
 streamlit-oauth
 requests
+scipy.stats
+matplotlib.pyplot
+streamlit-gsheets
