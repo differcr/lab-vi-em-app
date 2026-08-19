@@ -1,8 +1,10 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import requests # <--- Nueva librería para consultar a Google
 from streamlit_gsheets import GSheetsConnection
 from datetime import datetime
+from streamlit_oauth import OAuth2Component # <--- Nueva librería para el botón
 
 # ==========================================
 # CONFIGURACIÓN BÁSICA
@@ -10,42 +12,71 @@ from datetime import datetime
 st.set_page_config(page_title="Proyecto Lab VI - Usach", layout="wide")
 st.title("Laboratorio: Estimación e/m")
 
-# Establecer conexión segura con Google Sheets
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # ==========================================
-# MÓDULO DE AUTENTICACIÓN INSTITUCIONAL
+# MÓDULO DE AUTENTICACIÓN GOOGLE (SSO)
 # ==========================================
-# Inicializar el estado de la sesión si no existe
+# Extraemos las credenciales desde secrets.toml
+CLIENT_ID = st.secrets["google_oauth"]["client_id"]
+CLIENT_SECRET = st.secrets["google_oauth"]["client_secret"]
+REDIRECT_URI = st.secrets["google_oauth"]["redirect_uri"]
+
+AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+TOKEN_URL = "https://oauth2.googleapis.com/token"
+REVOKE_URL = "https://oauth2.googleapis.com/revoke"
+
+# Instanciar el componente de OAuth
+oauth2 = OAuth2Component(CLIENT_ID, CLIENT_SECRET, AUTHORIZE_URL, TOKEN_URL, REVOKE_URL)
+
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 
-# Pantalla de Login (Si no está autenticado, muestra esto y detiene el código)
 if not st.session_state.autenticado:
-    st.subheader("Acceso Restringido")
-    st.info("Para ingresar a la plataforma de adquisición, debe utilizar sus credenciales institucionales.")
+    st.subheader("Acceso Institucional Restringido")
+    st.info("Solo los usuarios con dominio @usach.cl pueden registrar datos experimentales.")
     
-    with st.form("login_form"):
-        correo_login = st.text_input("Correo Electrónico")
-        btn_ingresar = st.form_submit_button("Ingresar")
+    # Creamos el botón oficial de Google
+    result = oauth2.authorize_button(
+        name="Iniciar sesión con Google",
+        icon="https://www.google.com/favicon.ico",
+        redirect_uri=REDIRECT_URI,
+        scope="email profile",
+        key="google_login",
+        use_container_width=True
+    )
+    
+    # Si el usuario se loguea y Google devuelve un token:
+    if result and "token" in result:
+        st.session_state.token = result["token"]["access_token"]
         
-        if btn_ingresar:
-            if correo_login.strip().endswith("@usach.cl"):
-                # Guardar el correo en la sesión y cambiar estado a verdadero
-                st.session_state.autenticado = True
-                st.session_state.correo = correo_login.strip()
-                st.rerun() # Recarga la página para mostrar el contenido
-            else:
-                st.error("Acceso denegado. Debe utilizar un correo con el dominio @usach.cl")
+        # Hacemos una consulta rápida a Google para saber el correo de quien inició sesión
+        headers = {"Authorization": f"Bearer {st.session_state.token}"}
+        user_info = requests.get("https://www.googleapis.com/oauth2/v1/userinfo", headers=headers).json()
+        
+        correo_usuario = user_info.get("email", "")
+        nombre_usuario = user_info.get("name", "")
+        
+        # Filtro de Dominio USACH
+        if correo_usuario.endswith("@usach.cl"):
+            st.session_state.autenticado = True
+            st.session_state.correo = correo_usuario
+            st.session_state.nombre = nombre_usuario
+            st.rerun() # Recargar la página para entrar a la plataforma
+        else:
+            st.error(f"Acceso denegado: El correo {correo_usuario} no pertenece a la universidad.")
+            # Revocamos el token para cerrar su sesión inmediatamente
+            requests.post(REVOKE_URL, data={"token": st.session_state.token})
     
-    # st.stop() evita que se cargue el resto de la página si no se ha iniciado sesión
+    # Detenemos la ejecución aquí si no hay login exitoso
     st.stop()
 
 # ==========================================
 # INTERFAZ WEB PRINCIPAL (Una vez logueado)
 # ==========================================
-st.success(f"Sesión iniciada como: {st.session_state.correo}")
-tab1, tab2 = st.tabs(["Módulo de Adquisición", "Dashboard de Análisis"])
+st.success(f"Sesión verificada: {st.session_state.nombre} ({st.session_state.correo})")
+
+# ... (AQUÍ PEgas EL CÓDIGO DE LAS PESTAÑAS (TABS) QUE YA TENÍAMOS) ...
 
 # --- PESTAÑA 1: MÓDULO DE ADQUISICIÓN ---
 with tab1:
