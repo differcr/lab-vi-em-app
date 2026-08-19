@@ -73,127 +73,135 @@ st.success(f"Sesión verificada: {st.session_state.nombre} ({st.session_state.co
 tab1, tab2 = st.tabs(["Módulo de Adquisición", "Dashboard de Análisis"])
 
 # --- PESTAÑA 1: MÓDULO DE ADQUISICIÓN ---
+# --- PESTAÑA 1: MÓDULO DE ADQUISICIÓN ---
 with tab1:
     st.header("Ingreso de Mediciones")
     
-    with st.form("formulario_ingreso"):
-        col1, col2 = st.columns(2)
+    # 1. Información General
+    col_info1, col_info2 = st.columns(2)
+    with col_info1:
+        integrantes = st.text_input("Nombres y apellidos de los integrantes")
+    with col_info2:
+        equipo = st.selectbox("Seleccione Equipo Utilizado", [
+            "1 - PASCO SE-9629", 
+            "2 - TELTRON Doble Cañón TEL 2534", 
+            "3 - TELTRON Thomson Tipo S 1000617"
+        ])
+    
+    st.markdown("---")
+    
+    # 2. Selector de Modo de Ingreso
+    modo_ingreso = st.radio("Seleccione el modo de ingreso de datos:", ["Ingreso Individual", "Ingreso Múltiple (Por Lote)"], horizontal=True)
+    
+    if modo_ingreso == "Ingreso Individual":
+        st.info("Para ingreso individual, el sistema está optimizado para una sola lectura rápida. (Puedes mantener el código de st.form que tenías antes aquí).")
+        # Aquí puedes dejar el formulario st.form individual que ya tenías programado si lo deseas mantener.
         
-        with col1:
-            integrantes = st.text_input("Nombres y apellidos de los integrantes")
-            equipo = st.selectbox("Seleccione Equipo Utilizado", [
-                "1 - PASCO SE-9629", 
-                "2 - TELTRON Doble Cañón TEL 2534", 
-                "3 - TELTRON Thomson Tipo S 1000617"
-            ])
-            
-            st.markdown("---")
-            st.subheader("Variables Comunes")
-            vf = st.number_input("Voltaje filamento (Vf) [V]", min_value=0.0, format="%.2f")
-            va = st.number_input("Voltaje acelerador (Va) [V]", min_value=0.0, format="%.2f")
-            ib = st.number_input("Corriente Bobinas (Ib) [A]", min_value=0.0, format="%.2f")
-
-        with col2:
-            st.markdown("---")
-            st.subheader("Variables Específicas del Equipo")
-            
-            vp = None
-            vb = None
-            param_geometrico = None
-            
-            if "1 - PASCO" in equipo:
-                param_geometrico = st.number_input("Radio anillo (R) [m]", min_value=0.0, format="%.4f")
-                
-            elif "2 - TELTRON Doble Cañón" in equipo:
-                vp = st.number_input("Voltaje placas (Vp) [V]", min_value=0.0, format="%.2f")
-                vb = st.number_input("Voltaje Bobinas (Vb) [V]", min_value=0.0, format="%.2f")
-                param_geometrico = st.number_input("Curvatura (Ra o Re) [m]", min_value=0.0, format="%.4f")
-                
-            elif "3 - TELTRON Thomson" in equipo:
-                vp = st.number_input("Voltaje placas (Vp) [V]", min_value=0.0, format="%.2f")
-                vb = st.number_input("Voltaje Bobinas (Vb) [V]", min_value=0.0, format="%.2f")
-                param_geometrico = st.number_input("Distancia FA (L) [m]", min_value=0.0, format="%.4f")
-
-        submit = st.form_submit_button("Guardar Medición")
+    else:
+        st.subheader("Ingreso Múltiple y Análisis Estadístico")
+        st.markdown("Ingrese las mediciones en la tabla inferior. Puede agregar filas dinámicamente o copiar/pegar desde Excel.")
         
-        if submit:
-            if va == 0 or ib == 0 or param_geometrico == 0:
-                st.warning("Alerta: Revise los datos, hay valores clave en cero.")
+        # Definición de Incertidumbres Instrumentales
+        st.markdown("**1. Defina los errores instrumentales de los equipos de medida:**")
+        col_err1, col_err2, col_err3 = st.columns(3)
+        delta_v = col_err1.number_input("Incertidumbre Voltaje (ΔV) [V]", value=1.0, format="%.2f", step=0.1)
+        delta_i = col_err2.number_input("Incertidumbre Corriente (ΔI) [A]", value=0.01, format="%.3f", step=0.01)
+        delta_r = col_err3.number_input("Incertidumbre Radio (Δr) [m]", value=0.001, format="%.4f", step=0.001)
+        
+        st.markdown("**2. Tabla de Datos Experimentales:**")
+        # Crear un DataFrame vacío con 5 filas iniciales para que el usuario llene
+        df_vacio = pd.DataFrame({
+            "Va_Voltaje_Acelerador": [0.0] * 5,
+            "Ib_Corriente_Bobinas": [0.0] * 5,
+            "Parametro_Geometrico": [0.0] * 5
+        })
+        
+        # Editor de datos interactivo
+        df_editado = st.data_editor(df_vacio, num_rows="dynamic", use_container_width=True)
+        
+        if st.button("Procesar Lote y Guardar", type="primary"):
+            # Filtrar filas donde hayan ingresado datos reales (Voltaje > 0)
+            df_validos = df_editado[df_editado["Va_Voltaje_Acelerador"] > 0].copy()
+            
+            if df_validos.empty:
+                st.warning("Debe ingresar al menos una medición válida (con Va > 0) para procesar.")
             else:
                 # ==========================================
-                # 1. MOTOR DE CÁLCULO FÍSICO
+                # MOTOR DE CÁLCULO FÍSICO (VECTORIZADO)
                 # ==========================================
-                e_m_calculado = None
-                error_porcentual = None
                 valor_teorico = 1.758820e11 # C/kg
                 mu_0 = 4 * np.pi * 1e-7
-
-                try:
-                    if "1 - PASCO" in equipo:
-                        # Constantes del equipo PASCO SE-9629
-                        N_espiras = 130
-                        R_bobina = 0.15
-                        B = (8 * mu_0 * N_espiras * ib) / (np.sqrt(125) * R_bobina)
-                        e_m_calculado = (2 * va) / ((B**2) * (param_geometrico**2))
-                        
-                    elif "2 - TELTRON Doble Cañón" in equipo:
-                        # ATENCIÓN: Reemplaza N_espiras y R_bobina con los de tu guía de laboratorio TELTRON
-                        N_espiras = 320   # Valor típico Teltron, ¡Verificar!
-                        R_bobina = 0.068  # Valor típico Teltron, ¡Verificar!
-                        B = (8 * mu_0 * N_espiras * ib) / (np.sqrt(125) * R_bobina)
-                        # Fórmula de deflexión magnética estándar
-                        e_m_calculado = (2 * va) / ((B**2) * (param_geometrico**2))
-                        
-                    elif "3 - TELTRON Thomson" in equipo:
-                        # ATENCIÓN: Inserta aquí la ecuación exacta de campos cruzados de tu guía
-                        # e_m_calculado = ... 
-                        pass 
-
-                    # Calcular el error si se obtuvo un valor
-                    if e_m_calculado is not None:
-                        error_porcentual = abs((e_m_calculado - valor_teorico) / valor_teorico) * 100
-
-                except Exception as e:
-                    st.error("Error matemático en el cálculo. Revise los parámetros ingresados.")
-
+                
+                # Asumimos parámetros del PASCO SE-9629 por defecto para el ejemplo
+                N_espiras = 130
+                R_bobina = 0.15
+                
+                # 1. Calcular el Campo Magnético B para cada fila
+                df_validos['Campo_B'] = (8 * mu_0 * N_espiras * df_validos['Ib_Corriente_Bobinas']) / (np.sqrt(125) * R_bobina)
+                
+                # 2. Calcular e/m para cada fila
+                df_validos['e_m_Calculado'] = (2 * df_validos['Va_Voltaje_Acelerador']) / ((df_validos['Campo_B']**2) * (df_validos['Parametro_Geometrico']**2))
+                
+                # 3. Propagación de Error Instrumental para cada medición
+                # d(e/m)/(e/m) = sqrt( (dV/V)^2 + (2*dI/I)^2 + (2*dr/r)^2 )
+                termino_v = (delta_v / df_validos['Va_Voltaje_Acelerador'])**2
+                termino_i = (2 * delta_i / df_validos['Ib_Corriente_Bobinas'])**2
+                termino_r = (2 * delta_r / df_validos['Parametro_Geometrico'])**2
+                
+                df_validos['Error_Instrumental'] = df_validos['e_m_Calculado'] * np.sqrt(termino_v + termino_i + termino_r)
+                
+                # 4. Cálculos Estadísticos del Lote
+                em_promedio = df_validos['e_m_Calculado'].mean()
+                em_std = df_validos['e_m_Calculado'].std() if len(df_validos) > 1 else 0
+                error_porcentual_promedio = abs((em_promedio - valor_teorico) / valor_teorico) * 100
+                
                 # ==========================================
-                # 2. GUARDADO EN GOOGLE SHEETS
+                # INTERFAZ DE RESULTADOS ESTADÍSTICOS
+                # ==========================================
+                st.success(f"Se procesaron {len(df_validos)} mediciones exitosamente.")
+                
+                st.markdown("### Análisis Estadístico del Lote")
+                col_res1, col_res2, col_res3 = st.columns(3)
+                col_res1.metric(label="e/m Promedio (x̄)", value=f"{em_promedio:.4e}")
+                col_res2.metric(label="Desviación Estándar (σ)", value=f"± {em_std:.4e}")
+                
+                if error_porcentual_promedio <= 15.0:
+                    col_res3.metric(label="Error % Promedio", value=f"{error_porcentual_promedio:.2f} %", delta="Aceptable", delta_color="normal")
+                else:
+                    col_res3.metric(label="Error % Promedio", value=f"{error_porcentual_promedio:.2f} %", delta="Desviación Alta", delta_color="inverse")
+                
+                st.markdown("#### Detalle de Propagación Instrumental")
+                st.dataframe(df_validos[['Va_Voltaje_Acelerador', 'Ib_Corriente_Bobinas', 'Parametro_Geometrico', 'e_m_Calculado', 'Error_Instrumental']], use_container_width=True)
+                
+                # ==========================================
+                # GUARDADO EN GOOGLE SHEETS
                 # ==========================================
                 df_existente = conn.read()
                 
-                nueva_fila = pd.DataFrame([{
-                    "Fecha_Ingreso": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "Correo": st.session_state.correo,
-                    "Integrantes": integrantes,
-                    "Equipo": equipo.split(" - ")[1],
-                    "Vf_Voltaje_Filamento": vf,
-                    "Va_Voltaje_Acelerador": va,
-                    "Vp_Voltaje_Placas": vp if vp is not None else np.nan,
-                    "Vb_Voltaje_Bobinas": vb if vb is not None else np.nan,
-                    "Ib_Corriente_Bobinas": ib,
-                    "Parametro_Geometrico": param_geometrico,
-                    # Opcional: También podemos guardar el cálculo en la nube directamente
-                    "e_m_Calculado": e_m_calculado if e_m_calculado else np.nan,
-                    "Error_Porcentual": error_porcentual if error_porcentual else np.nan,
-                    "Observaciones": "Dato válido"
-                }])
+                # Preparar las filas para guardar
+                filas_para_guardar = []
+                for index, row in df_validos.iterrows():
+                    filas_para_guardar.append({
+                        "Fecha_Ingreso": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "Correo": st.session_state.correo,
+                        "Integrantes": integrantes,
+                        "Equipo": equipo.split(" - ")[1],
+                        "Vf_Voltaje_Filamento": np.nan, # No se incluyó en la tabla simple por espacio
+                        "Va_Voltaje_Acelerador": row['Va_Voltaje_Acelerador'],
+                        "Vp_Voltaje_Placas": np.nan,
+                        "Vb_Voltaje_Bobinas": np.nan,
+                        "Ib_Corriente_Bobinas": row['Ib_Corriente_Bobinas'],
+                        "Parametro_Geometrico": row['Parametro_Geometrico'],
+                        "e_m_Calculado": row['e_m_Calculado'],
+                        "Error_Porcentual": error_porcentual_promedio,
+                        "Observaciones": f"Lote. Err Inst: ±{row['Error_Instrumental']:.2e}"
+                    })
                 
-                # Actualizar Sheets (Asegúrate de que Worksheet coincide con tu Excel, por ej "Hoja 1" o "Sheet1")
-                df_actualizado = pd.concat([df_existente, nueva_fila], ignore_index=True)
+                df_nuevas_filas = pd.DataFrame(filas_para_guardar)
+                df_actualizado = pd.concat([df_existente, df_nuevas_filas], ignore_index=True)
+                
                 conn.update(worksheet="Sheet1", data=df_actualizado)
-                
-                # ==========================================
-                # 3. INTERFAZ DE RESULTADOS (FEEDBACK VISUAL)
-                # ==========================================
-                st.success("¡Datos guardados correctamente en la base institucional!")
-                
-                if e_m_calculado is not None:
-                    st.markdown("### Resultados Preliminares del Ensayo")
-                    col_res1, col_res2, col_res3 = st.columns(3)
-                    
-                    col_res1.metric(label="Relación e/m Obtenida", value=f"{e_m_calculado:.4e} C/kg")
-                    col_res2.metric(label="Valor Teórico", value=f"{valor_teorico:.4e} C/kg")
-                    
+                st.info("Datos del lote respaldados en la base institucional.")
                     # Mostrar el error en rojo si es muy alto, o normal si es bajo
                     if error_porcentual <= 15.0:
                         col_res3.metric(label="Error Experimental", value=f"{error_porcentual:.2f} %", delta="Aceptable", delta_color="normal")
