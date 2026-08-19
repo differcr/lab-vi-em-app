@@ -122,33 +122,40 @@ with tab1:
             
             valor_teorico = 1.758820e11 # C/kg
             def calcular_em(row, eq, exp):
-                # Usamos la misma columna para el voltaje, sea de placas o acelerador
-                V_medido = row['Va_Voltaje_Acelerador'] 
-                Ih = row['Ib_Corriente_Bobinas']
-                # Esta variable ES el radio
-                R = row['Parametro_Geometrico'] 
-                
                 try:
+                    V_medido = float(row.get('Va_Voltaje_Acelerador', 0) or 0)
+                    Ih = float(row.get('Ib_Corriente_Bobinas', 0) or 0)
+                    R = float(row.get('Parametro_Geometrico', 0) or 0)
+                    
+                    if V_medido <= 0:
+                        return 0.0
+
                     if "PASCO" in eq:
                         B = Ih * 0.000739
+                        if B == 0 or R == 0: return 0.0
                         return (2 * V_medido) / ((B**2) * (R**2))
                         
                     elif "Doble Cañón" in eq:
+                        if (Ih * R) == 0: return 0.0
                         return (V_medido / ((Ih * R)**2)) * 1.15e5
                         
                     elif "1000617" in eq:
                         if exp == "Balance de Campos":
+                            if Ih == 0: return 0.0
                             return (V_medido / (Ih**2)) * 2.6e7
                         elif exp == "Deflexión de Campos":
+                            if (Ih * R) == 0: return 0.0
                             return (V_medido / ((Ih**2) * (R**2))) * 1.15e5
                         elif exp == "Fuente para mínimo balance de campos":
+                            if (Ih**2 * R) == 0: return 0.0
                             return (V_medido / ((Ih**2) * R)) * 7.19e5
                             
                     elif "100622" in eq:
                         B = 4.17e-3 * Ih
+                        if (B * R) == 0: return 0.0
                         return (2 * V_medido) / ((B * R)**2)
                         
-                except ZeroDivisionError:
+                except Exception:
                     return 0.0
                 return 0.0
 
