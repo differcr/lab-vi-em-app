@@ -80,8 +80,9 @@ with tab1:
         equipo = st.selectbox("Seleccione Equipo Utilizado", [
             "1 - PASCO SE-9629", 
             "2 - TELTRON Doble Cañón TEL 2534", 
-            "3 - TELTRON Thomson Tipo S 1000617"
-        ])
+            "3 - Thomson Tube S 1000617",
+            "4 - Thomson Tube S-100622"
+    ])
     
     st.markdown("---")
     
@@ -120,17 +121,40 @@ with tab1:
             # MOTOR DE CÁLCULO FÍSICO 
             
             valor_teorico = 1.758820e11 # C/kg
-            mu_0 = 4 * np.pi * 1e-7
-            
-            # parámetros del PASCO SE-9629 
-            N_espiras = 130
-            R_bobina = 0.15
-            
-            # 1. Calcular el Campo Magnético B 
-            df_validos['Campo_B'] = (8 * mu_0 * N_espiras * df_validos['Ib_Corriente_Bobinas']) / (np.sqrt(125) * R_bobina)
-            
-            # 2. Calcular e/m 
-            df_validos['e_m_Calculado'] = (2 * df_validos['Va_Voltaje_Acelerador']) / ((df_validos['Campo_B']**2) * (df_validos['Parametro_Geometrico']**2))
+            def calcular_em(row, eq, exp):
+                # Usamos la misma columna para el voltaje, sea de placas o acelerador
+                V_medido = row['Va_Voltaje_Acelerador'] 
+                Ih = row['Ib_Corriente_Bobinas']
+                # Esta variable ES el radio
+                R = row['Parametro_Geometrico'] 
+                
+                try:
+                    if "PASCO" in eq:
+                        B = Ih * 0.000739
+                        return (2 * V_medido) / ((B**2) * (R**2))
+                        
+                    elif "Doble Cañón" in eq:
+                        return (V_medido / ((Ih * R)**2)) * 1.15e5
+                        
+                    elif "1000617" in eq:
+                        if exp == "Balance de Campos":
+                            return (V_medido / (Ih**2)) * 2.6e7
+                        elif exp == "Deflexión de Campos":
+                            return (V_medido / ((Ih**2) * (R**2))) * 1.15e5
+                        elif exp == "Fuente para mínimo balance de campos":
+                            return (V_medido / ((Ih**2) * R)) * 7.19e5
+                            
+                    elif "100622" in eq:
+                        B = 4.17e-3 * Ih
+                        return (2 * V_medido) / ((B * R)**2)
+                        
+                except ZeroDivisionError:
+                    return 0.0
+                return 0.0
+
+            df_validos['e_m_Calculado'] = df_validos.apply(
+                lambda row: calcular_em(row, equipo, experimento), axis=1
+            )
             
             # 3. Propagación de Error Instrumental para cada medición
             termino_v = (delta_v / df_validos['Va_Voltaje_Acelerador'])**2
