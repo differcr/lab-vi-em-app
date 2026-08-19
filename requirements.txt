@@ -3,7 +3,6 @@ pandas
 numpy
 st-gsheets-connection
 streamlit-oauth
+scipy
+matplotlib
 requests
-scipy.stats
-matplotlib.pyplot
-streamlit-gsheets
