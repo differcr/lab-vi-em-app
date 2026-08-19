@@ -14,6 +14,46 @@ st.title("Laboratorio: Estimación e/m")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 
+# --- FUNCIÓN MAESTRA DE CÁLCULO (Declarada de forma global para evitar errores) ---
+def calcular_em(row, eq, exp):
+    try:
+        V_medido = float(row.get('Va_Voltaje_Acelerador', 0) or 0)
+        Ih = float(row.get('Ib_Corriente_Bobinas', 0) or 0)
+        R = float(row.get('Parametro_Geometrico', 0) or 0)
+        
+        if V_medido <= 0:
+            return 0.0
+
+        if "PASCO" in eq:
+            B = Ih * 0.000739
+            if B == 0 or R == 0: return 0.0
+            return (2 * V_medido) / ((B**2) * (R**2))
+            
+        elif "Doble Cañón" in eq:
+            if (Ih * R) == 0: return 0.0
+            return (V_medido / ((Ih * R)**2)) * 1.15e5
+            
+        elif "1000617" in eq:
+            if exp == "Balance de Campos":
+                if Ih == 0: return 0.0
+                return (V_medido / (Ih**2)) * 2.6e7
+            elif exp == "Deflexión de Campos":
+                if (Ih * R) == 0: return 0.0
+                return (V_medido / ((Ih**2) * (R**2))) * 1.15e5
+            elif exp == "Fuente para mínimo balance de campos":
+                if (Ih**2 * R) == 0: return 0.0
+                return (V_medido / ((Ih**2) * R)) * 7.19e5
+                
+        elif "100622" in eq:
+            B = 4.17e-3 * Ih
+            if (B * R) == 0: return 0.0
+            return (2 * V_medido) / ((B * R)**2)
+            
+    except Exception:
+        return 0.0
+    return 0.0
+
+
 # MÓDULO DE AUTENTICACIÓN GOOGLE (SSO)
 CLIENT_ID = st.secrets["google_oauth"]["client_id"]
 CLIENT_SECRET = st.secrets["google_oauth"]["client_secret"]
@@ -72,7 +112,6 @@ tab1, tab2 = st.tabs(["Módulo de Adquisición", "Dashboard de Análisis"])
 with tab1:
     st.header("Ingreso de Mediciones")
     
-   
     col_info1, col_info2 = st.columns(2)
     with col_info1:
         integrantes = st.text_input("Nombres y apellidos de los integrantes")
@@ -82,7 +121,15 @@ with tab1:
             "2 - TELTRON Doble Cañón TEL 2534", 
             "3 - Thomson Tube S 1000617",
             "4 - Thomson Tube S-100622"
-    ])
+        ])
+        
+        experimento = "Único"
+        if "1000617" in equipo:
+            experimento = st.selectbox("Seleccione el Experimento Específico", [
+                "Balance de Campos",
+                "Deflexión de Campos",
+                "Fuente para mínimo balance de campos"
+            ])
     
     st.markdown("---")
     
@@ -98,69 +145,29 @@ with tab1:
     delta_r = col_err3.number_input("Incertidumbre Radio (Δr) [m]", value=0.001, format="%.4f", step=0.001)
     
     st.markdown("**2. Tabla de Datos Experimentales:**")
-    # Crear un DataFrame vacío con 5 filas iniciales para que el usuario llene
     df_vacio = pd.DataFrame({
         "Va_Voltaje_Acelerador": [0.0] * 5,
         "Ib_Corriente_Bobinas": [0.0] * 5,
         "Parametro_Geometrico": [0.0] * 5
     })
-    # --- LÍNEAS NUEVAS: Ajustar el contador numérico ---
     df_vacio.index = range(1, len(df_vacio) + 1)
     df_vacio.index.name = "Dato N°"
-    # Editor de datos interactivo
+    
     df_editado = st.data_editor(df_vacio, num_rows="dynamic", use_container_width=True)
     
     if st.button("Procesar Lote y Guardar", type="primary"):
-        # Filtrar filas donde hayan ingresado datos reales (Voltaje > 0)
         df_validos = df_editado[df_editado["Va_Voltaje_Acelerador"] > 0].copy()
+        
         if df_validos.empty:
             st.warning("Debe ingresar al menos una medición válida (con Va > 0) para procesar.")
         else:
-            # MOTOR DE CÁLCULO FÍSICO 
             valor_teorico = 1.758820e11 # C/kg
-            mu_0 = 4 * np.pi * 1e-7
-
-            def calcular_em(row, eq, exp):
-                try:
-                    V_medido = float(row.get('Va_Voltaje_Acelerador', 0) or 0)
-                    Ih = float(row.get('Ib_Corriente_Bobinas', 0) or 0)
-                    R = float(row.get('Parametro_Geometrico', 0) or 0)
-                    
-                    if V_medido <= 0:
-                        return 0.0
-
-                    if "PASCO" in eq:
-                        B = Ih * 0.000739
-                        if B == 0 or R == 0: return 0.0
-                        return (2 * V_medido) / ((B**2) * (R**2))
-                        
-                    elif "Doble Cañón" in eq:
-                        if (Ih * R) == 0: return 0.0
-                        return (V_medido / ((Ih * R)**2)) * 1.15e5
-                        
-                    elif "1000617" in eq:
-                        if exp == "Balance de Campos":
-                            if Ih == 0: return 0.0
-                            return (V_medido / (Ih**2)) * 2.6e7
-                        elif exp == "Deflexión de Campos":
-                            if (Ih * R) == 0: return 0.0
-                            return (V_medido / ((Ih**2) * (R**2))) * 1.15e5
-                        elif exp == "Fuente para mínimo balance de campos":
-                            if (Ih**2 * R) == 0: return 0.0
-                            return (V_medido / ((Ih**2) * R)) * 7.19e5
-                            
-                    elif "100622" in eq:
-                        B = 4.17e-3 * Ih
-                        if (B * R) == 0: return 0.0
-                        return (2 * V_medido) / ((B * R)**2)
-                        
-                except Exception:
-                    return 0.0
-                return 0.0
-
+            
+            # Aplicar la función global limpia y sin errores de alcance
             df_validos['e_m_Calculado'] = df_validos.apply(
                 lambda row: calcular_em(row, equipo, experimento), axis=1
             )
+            
             # 3. Propagación de Error Instrumental para cada medición
             termino_v = (delta_v / df_validos['Va_Voltaje_Acelerador'])**2
             termino_i = (2 * delta_i / df_validos['Ib_Corriente_Bobinas'])**2
@@ -173,7 +180,6 @@ with tab1:
             em_std = df_validos['e_m_Calculado'].std() if len(df_validos) > 1 else 0
             error_porcentual_promedio = abs((em_promedio - valor_teorico) / valor_teorico) * 100
             
-        
             # INTERFAZ DE RESULTADOS ESTADÍSTICOS
             st.success(f"Se procesaron {len(df_validos)} mediciones exitosamente.")
             
@@ -190,12 +196,9 @@ with tab1:
             st.markdown("#### Detalle de Propagación Instrumental")
             st.dataframe(df_validos[['Va_Voltaje_Acelerador', 'Ib_Corriente_Bobinas', 'Parametro_Geometrico', 'e_m_Calculado', 'Error_Instrumental']], use_container_width=True)
             
-           
             # GUARDADO EN GOOGLE SHEETS
-            
             df_existente = conn.read()
             
-            # Preparar las filas para guardar
             filas_para_guardar = []
             for index, row in df_validos.iterrows():
                 filas_para_guardar.append({
@@ -226,24 +229,19 @@ with tab2:
     st.header("Análisis Histórico y Deriva Temporal")
     
     try:
-        # Cargar datos automáticamente sin necesidad de apretar un botón
         df = conn.read()
         
-        # Verificamos si la columna existe antes de intentar limpiar vacíos
         if 'Va_Voltaje_Acelerador' in df.columns:
             df = df.dropna(subset=['Va_Voltaje_Acelerador'])
         elif 'Voltaje_Acelerador' in df.columns: 
             df = df.dropna(subset=['Voltaje_Acelerador'])
             
-        # Si hay datos válidos, armamos el panel
         if not df.empty and len(df) > 0:
             st.success(f"Conexión exitosa: Se cargaron {len(df)} mediciones históricas.")
             
-            # 1. Mostrar la tabla de datos completa
             st.subheader("Base de Datos Experimental")
             st.dataframe(df, use_container_width=True)
             
-            # 2. Mostrar gráficos interactivos
             if 'Error_Porcentual' in df.columns and 'e_m_Calculado' in df.columns:
                 st.markdown("---")
                 st.subheader("Análisis Visual")
