@@ -6,17 +6,15 @@ from streamlit_gsheets import GSheetsConnection
 from datetime import datetime
 from streamlit_oauth import OAuth2Component
 
-# ==========================================
+
 # CONFIGURACIÓN BÁSICA
-# ==========================================
 st.set_page_config(page_title="Proyecto Lab VI - Usach", layout="wide")
 st.title("Laboratorio: Estimación e/m")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# ==========================================
+
 # MÓDULO DE AUTENTICACIÓN GOOGLE (SSO)
-# ==========================================
 CLIENT_ID = st.secrets["google_oauth"]["client_id"]
 CLIENT_SECRET = st.secrets["google_oauth"]["client_secret"]
 REDIRECT_URI = st.secrets["google_oauth"]["redirect_uri"]
@@ -64,9 +62,8 @@ if not st.session_state.autenticado:
     
     st.stop()
 
-# ==========================================
+
 # INTERFAZ WEB PRINCIPAL (Una vez logueado)
-# ==========================================
 st.success(f"Sesión verificada: {st.session_state.nombre} ({st.session_state.correo})")
 
 tab1, tab2 = st.tabs(["Módulo de Adquisición", "Dashboard de Análisis"])
@@ -75,7 +72,7 @@ tab1, tab2 = st.tabs(["Módulo de Adquisición", "Dashboard de Análisis"])
 with tab1:
     st.header("Ingreso de Mediciones")
     
-    # 1. Información General
+   
     col_info1, col_info2 = st.columns(2)
     with col_info1:
         integrantes = st.text_input("Nombres y apellidos de los integrantes")
@@ -119,20 +116,20 @@ with tab1:
         if df_validos.empty:
             st.warning("Debe ingresar al menos una medición válida (con Va > 0) para procesar.")
         else:
-            # ==========================================
-            # MOTOR DE CÁLCULO FÍSICO (VECTORIZADO)
-            # ==========================================
+           
+            # MOTOR DE CÁLCULO FÍSICO 
+            
             valor_teorico = 1.758820e11 # C/kg
             mu_0 = 4 * np.pi * 1e-7
             
-            # Asumimos parámetros del PASCO SE-9629 por defecto para el ejemplo
+            # parámetros del PASCO SE-9629 
             N_espiras = 130
             R_bobina = 0.15
             
-            # 1. Calcular el Campo Magnético B para cada fila
+            # 1. Calcular el Campo Magnético B 
             df_validos['Campo_B'] = (8 * mu_0 * N_espiras * df_validos['Ib_Corriente_Bobinas']) / (np.sqrt(125) * R_bobina)
             
-            # 2. Calcular e/m para cada fila
+            # 2. Calcular e/m 
             df_validos['e_m_Calculado'] = (2 * df_validos['Va_Voltaje_Acelerador']) / ((df_validos['Campo_B']**2) * (df_validos['Parametro_Geometrico']**2))
             
             # 3. Propagación de Error Instrumental para cada medición
@@ -147,9 +144,8 @@ with tab1:
             em_std = df_validos['e_m_Calculado'].std() if len(df_validos) > 1 else 0
             error_porcentual_promedio = abs((em_promedio - valor_teorico) / valor_teorico) * 100
             
-            # ==========================================
+        
             # INTERFAZ DE RESULTADOS ESTADÍSTICOS
-            # ==========================================
             st.success(f"Se procesaron {len(df_validos)} mediciones exitosamente.")
             
             st.markdown("### Análisis Estadístico del Lote")
@@ -165,9 +161,9 @@ with tab1:
             st.markdown("#### Detalle de Propagación Instrumental")
             st.dataframe(df_validos[['Va_Voltaje_Acelerador', 'Ib_Corriente_Bobinas', 'Parametro_Geometrico', 'e_m_Calculado', 'Error_Instrumental']], use_container_width=True)
             
-            # ==========================================
+           
             # GUARDADO EN GOOGLE SHEETS
-            # ==========================================
+            
             df_existente = conn.read()
             
             # Preparar las filas para guardar
