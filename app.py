@@ -9,6 +9,65 @@ from datetime import datetime
 import base64
 import json
 import requests
+
+# =============================================================================
+# CONFIGURACIÓN BÁSICA DE LA PÁGINA (Debe ser el primer comando de Streamlit)
+# =============================================================================
+st.set_page_config(page_title="Proyecto Lab VI - Usach", layout="wide")
+
+# =============================================================================
+# MÓDULO 4: AUTENTICACIÓN OAUTH Y BARRERA DE SEGURIDAD
+# =============================================================================
+
+# 1. INICIALIZAR LA VARIABLE DE SESIÓN (Esto evita el KeyError)
+if "user_email" not in st.session_state:
+    st.session_state["user_email"] = None
+
+# Configuración de Google OAuth 2.0 extraída de st.secrets
+CLIENT_ID = st.secrets.get("GOOGLE_CLIENT_ID", "TU_CLIENT_ID_AQUI")
+CLIENT_SECRET = st.secrets.get("GOOGLE_CLIENT_SECRET", "TU_CLIENT_SECRET_AQUI")
+REDIRECT_URI = st.secrets.get("REDIRECT_URI", "http://localhost:8501") 
+
+AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+TOKEN_URL = "https://oauth2.googleapis.com/token"
+REVOKE_TOKEN_URL = "https://oauth2.googleapis.com/revoke"
+
+oauth2 = OAuth2Component(CLIENT_ID, CLIENT_SECRET, AUTHORIZE_URL, TOKEN_URL, TOKEN_URL, REVOKE_TOKEN_URL)
+
+# 2. BARRERA DE SEGURIDAD OAUTH
+if st.session_state["user_email"] is None:
+    st.title("Acceso Restringido - Laboratorio Física VI")
+    st.write("Debe iniciar sesión exclusivamente con su cuenta institucional de la Universidad de Santiago de Chile (@usach.cl).")
+    
+    result = oauth2.authorize_button(
+        name="Continuar con Google",
+        icon="https://www.google.com/favicon.ico",
+        redirect_uri=REDIRECT_URI,
+        scope="openid email profile",
+        key="google_login",
+        use_container_width=True
+    )
+    
+    if result:
+        # Extraer y decodificar el ID Token para obtener el correo
+        token = result.get("token")
+        id_token = token.get("id_token")
+        
+        payload = id_token.split(".")[1]
+        payload += "=" * ((4 - len(payload) % 4) % 4) # Padding requerido por base64
+        decoded_payload = json.loads(base64.b64decode(payload).decode("utf-8"))
+        
+        correo_usuario = decoded_payload.get("email")
+        
+        # Validación de dominio estricta
+        if correo_usuario and correo_usuario.endswith("@usach.cl"):
+            st.session_state["user_email"] = correo_usuario
+            st.rerun()
+        else:
+            st.error(f"Acceso denegado. El correo {correo_usuario} no tiene permisos. Utilice su credencial @usach.cl.")
+            
+    st.stop() # Detiene la carga del resto de la app si no está autenticado
+
 # =============================================================================
 # MÓDULO 1: CONSTANTES, PARAMETRIZACIÓN Y FUNCIONES MATEMÁTICAS
 # =============================================================================
@@ -17,9 +76,19 @@ MU_0 = 4 * np.pi * 10**-7
 EM_TEORICO = 1.758820e11   
 
 equipos_parametros = {
-    "PASCO SE-9629": {"R": 0.158, "N": 130},
-    "TELTRON TEL 2534": {"D": 0.138, "k_B": 4.17e-3},
-    "TELTRON Tipo S 1000617": {"R": 0.068, "N": 320, "k_B": 4.2e-3}
+    "PASCO SE-9629": {
+        "R": 0.158, 
+        "N": 130    
+    },
+    "TELTRON TEL 2534": {
+        "D": 0.138, 
+        "k_B": 4.17e-3 
+    },
+    "TELTRON Tipo S 1000617": {
+        "R": 0.068, 
+        "N": 320,   
+        "k_B": 4.2e-3  
+    }
 }
 
 protocolo_adquisicion = {
@@ -196,64 +265,12 @@ def generar_grafico_regresion(x, y, res, titulo, em_val, error):
     return fig
 
 # =============================================================================
-# MÓDULO 4: AUTENTICACIÓN OAUTH Y APLICACIÓN PRINCIPAL
+# APLICACIÓN PRINCIPAL (Carga solo si pasó la autenticación)
 # =============================================================================
 
-st.set_page_config(page_title="Proyecto Lab VI - Usach", layout="wide")
-
-# Configuración de Google OAuth 2.0 extraída de st.secrets
-CLIENT_ID = st.secrets["google_oauth"]["client_id"]
-CLIENT_SECRET = st.secrets["google_oauth"]["client_secret"]
-REDIRECT_URI = st.secrets["google_oauth"]["redirect_uri"]
-
-AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
-TOKEN_URL = "https://oauth2.googleapis.com/token"
-REVOKE_URL = "https://oauth2.googleapis.com/revoke"
-
-oauth2 = OAuth2Component(CLIENT_ID, CLIENT_SECRET, AUTHORIZE_URL, TOKEN_URL, REVOKE_URL)
-
-if "autenticado" not in st.session_state:
-    st.session_state.autenticado = False
-
-if not st.session_state.autenticado:
-    st.subheader("Acceso Institucional Restringido")
-    st.info("Solo los usuarios con dominio @usach.cl pueden registrar datos experimentales.")
-    
-    result = oauth2.authorize_button(
-        name="Iniciar sesión con Google",
-        icon="https://www.google.com/favicon.ico",
-        redirect_uri=REDIRECT_URI,
-        scope="email profile",
-        key="google_login",
-        use_container_width=True,
-        extras_params={"prompt": "select_account", "hd": "usach.cl"}
-    )
-    
-    if result and "token" in result:
-        st.session_state.token = result["token"]["access_token"]
-        
-        headers = {"Authorization": f"Bearer {st.session_state.token}"}
-        user_info = requests.get("https://www.googleapis.com/oauth2/v1/userinfo", headers=headers).json()
-        
-        correo_usuario = user_info.get("email", "")
-        nombre_usuario = user_info.get("name", "")
-        
-        if correo_usuario.endswith("@usach.cl"):
-            st.session_state.autenticado = True
-            st.session_state.correo = correo_usuario
-            st.session_state.nombre = nombre_usuario
-            st.rerun()
-        else:
-            st.error(f"Acceso denegado: El correo {correo_usuario} no pertenece a la universidad.")
-            requests.post(REVOKE_URL, data={"token": st.session_state.token})
-    
-    st.stop()
-
-
-# SI PASA LA BARRERA, SE CARGA LA APP
 st.sidebar.write(f"Conectado como: **{st.session_state['user_email']}**")
 if st.sidebar.button("Cerrar Sesión"):
-    del st.session_state["user_email"]
+    st.session_state["user_email"] = None
     st.rerun()
 
 st.title("Laboratorio: Estimación e/m")
