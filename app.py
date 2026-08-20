@@ -8,7 +8,7 @@ from streamlit_oauth import OAuth2Component
 from datetime import datetime
 import base64
 import json
-
+import requests
 # =============================================================================
 # MÓDULO 1: CONSTANTES, PARAMETRIZACIÓN Y FUNCIONES MATEMÁTICAS
 # =============================================================================
