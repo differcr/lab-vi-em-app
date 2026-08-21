@@ -195,7 +195,7 @@ with tab1:
                 
                 filas_para_guardar.append({
                     "Fecha_Ingreso": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "Correo": st.session_state.correo,
+                    "Correo": st.session_state["correo"],
                     "Integrantes": integrantes,
                     "Equipo": equipo.split(" - ")[1],
                     "Vf_Voltaje_Filamento": np.nan,
