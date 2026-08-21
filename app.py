@@ -51,57 +51,7 @@ def calcular_em(row, eq, exp):
     return 0.0
 
 
-# MÓDULO DE AUTENTICACIÓN GOOGLE (SSO)
-CLIENT_ID = st.secrets["google_oauth"]["client_id"]
-CLIENT_SECRET = st.secrets["google_oauth"]["client_secret"]
-REDIRECT_URI = st.secrets["google_oauth"]["redirect_uri"]
 
-AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
-TOKEN_URL = "https://oauth2.googleapis.com/token"
-REVOKE_URL = "https://oauth2.googleapis.com/revoke"
-
-oauth2 = OAuth2Component(CLIENT_ID, CLIENT_SECRET, AUTHORIZE_URL, TOKEN_URL, REVOKE_URL)
-
-if "autenticado" not in st.session_state:
-    st.session_state.autenticado = False
-
-if not st.session_state.autenticado:
-    st.subheader("Acceso Institucional Restringido")
-    st.info("Solo los usuarios con dominio @usach.cl pueden registrar datos experimentales.")
-    
-    result = oauth2.authorize_button(
-        name="Iniciar sesión con Google",
-        icon="https://www.google.com/favicon.ico",
-        redirect_uri=REDIRECT_URI,
-        scope="email profile",
-        key="google_login",
-        use_container_width=True,
-        extras_params={"prompt": "select_account", "hd": "usach.cl"}
-    )
-    
-    if result and "token" in result:
-        st.session_state.token = result["token"]["access_token"]
-        
-        headers = {"Authorization": f"Bearer {st.session_state.token}"}
-        user_info = requests.get("https://www.googleapis.com/oauth2/v1/userinfo", headers=headers).json()
-        
-        correo_usuario = user_info.get("email", "")
-        nombre_usuario = user_info.get("name", "")
-        
-        if correo_usuario.endswith("@usach.cl"):
-            st.session_state.autenticado = True
-            st.session_state.correo = correo_usuario
-            st.session_state.nombre = nombre_usuario
-            st.rerun()
-        else:
-            st.error(f"Acceso denegado: El correo {correo_usuario} no pertenece a la universidad.")
-            requests.post(REVOKE_URL, data={"token": st.session_state.token})
-    
-    st.stop()
-
-
-# INTERFAZ WEB PRINCIPAL (Una vez logueado)
-st.success(f"Sesión verificada: {st.session_state.nombre} ({st.session_state.correo})")
 
 tab1, tab2 = st.tabs(["Módulo de Adquisición", "Dashboard de Análisis"])
 
