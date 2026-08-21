@@ -17,9 +17,11 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 # --- FUNCIÓN MAESTRA DE CÁLCULO (Declarada de forma global para evitar errores) ---
 def calcular_em(row, eq, exp):
     try:
-        V_medido = float(row.get('Va_Voltaje_Acelerador', 0) or 0)
+        # Extrae el voltaje disponible dinámicamente según el experimento
+        V_medido = float(row.get('Va_Voltaje_Acelerador') or row.get('Vp_Voltaje_Potenciador') or row.get('Va_Voltaje_Anodo') or 0)
         Ih = float(row.get('Ib_Corriente_Bobinas', 0) or 0)
-        R = float(row.get('Parametro_Geometrico', 0) or 0)
+        # Extrae el parámetro geométrico (radio o distancia) si existe
+        R = float(row.get('Parametro_Geometrico') or row.get('R_Radio_Curvatura') or row.get('R_Radio_Circunferencia') or 0)
         
         if V_medido <= 0:
             return 0.0
@@ -42,69 +44,14 @@ def calcular_em(row, eq, exp):
                 return (V_medido / ((Ih**2) * (R**2))) * 1.15e5
             elif exp == "Fuente para mínimo balance de campos":
                 if (Ih**2 * R) == 0: return 0.0
-                return (V_medido / ((Ih**2) * R)) * 7.19e5
-                
-        elif "100622" in eq:
-            B = 4.17e-3 * Ih
-            if (B * R) == 0: return 0.0
-            return (2 * V_medido) / ((B * R)**2)
+                return (V_medido / ((Ih**2) * R)) * 7.19e6
             
     except Exception:
         return 0.0
     return 0.0
 
 
-# MÓDULO DE AUTENTICACIÓN GOOGLE (SSO)
-CLIENT_ID = st.secrets["google_oauth"]["client_id"]
-CLIENT_SECRET = st.secrets["google_oauth"]["client_secret"]
-REDIRECT_URI = st.secrets["google_oauth"]["redirect_uri"]
 
-AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
-TOKEN_URL = "https://oauth2.googleapis.com/token"
-REVOKE_URL = "https://oauth2.googleapis.com/revoke"
-
-oauth2 = OAuth2Component(CLIENT_ID, CLIENT_SECRET, AUTHORIZE_URL, TOKEN_URL, REVOKE_URL)
-
-if "autenticado" not in st.session_state:
-    st.session_state.autenticado = False
-
-if not st.session_state.autenticado:
-    st.subheader("Acceso Institucional Restringido")
-    st.info("Solo los usuarios con dominio @usach.cl pueden registrar datos experimentales.")
-    
-    result = oauth2.authorize_button(
-        name="Iniciar sesión con Google",
-        icon="https://www.google.com/favicon.ico",
-        redirect_uri=REDIRECT_URI,
-        scope="email profile",
-        key="google_login",
-        use_container_width=True,
-        extras_params={"prompt": "select_account", "hd": "usach.cl"}
-    )
-    
-    if result and "token" in result:
-        st.session_state.token = result["token"]["access_token"]
-        
-        headers = {"Authorization": f"Bearer {st.session_state.token}"}
-        user_info = requests.get("https://www.googleapis.com/oauth2/v1/userinfo", headers=headers).json()
-        
-        correo_usuario = user_info.get("email", "")
-        nombre_usuario = user_info.get("name", "")
-        
-        if correo_usuario.endswith("@usach.cl"):
-            st.session_state.autenticado = True
-            st.session_state.correo = correo_usuario
-            st.session_state.nombre = nombre_usuario
-            st.rerun()
-        else:
-            st.error(f"Acceso denegado: El correo {correo_usuario} no pertenece a la universidad.")
-            requests.post(REVOKE_URL, data={"token": st.session_state.token})
-    
-    st.stop()
-
-
-# INTERFAZ WEB PRINCIPAL (Una vez logueado)
-st.success(f"Sesión verificada: {st.session_state.nombre} ({st.session_state.correo})")
 
 tab1, tab2 = st.tabs(["Módulo de Adquisición", "Dashboard de Análisis"])
 
@@ -119,8 +66,7 @@ with tab1:
         equipo = st.selectbox("Seleccione Equipo Utilizado", [
             "1 - PASCO SE-9629", 
             "2 - TELTRON Doble Cañón TEL 2534", 
-            "3 - Thomson Tube S 1000617",
-            "4 - Thomson Tube S-100622"
+            "3 - Thomson Tube S 1000617"
         ])
         
         experimento = "Único"
@@ -142,24 +88,62 @@ with tab1:
     col_err1, col_err2, col_err3 = st.columns(3)
     delta_v = col_err1.number_input("Incertidumbre Voltaje (ΔV) [V]", value=1.0, format="%.2f", step=0.1)
     delta_i = col_err2.number_input("Incertidumbre Corriente (ΔI) [A]", value=0.01, format="%.3f", step=0.01)
-    delta_r = col_err3.number_input("Incertidumbre Radio (Δr) [m]", value=0.001, format="%.4f", step=0.001)
+    delta_r = col_err3.number_input("Incertidumbre Radio/Distancia (Δr) [m]", value=0.001, format="%.4f", step=0.001)
     
     st.markdown("**2. Tabla de Datos Experimentales:**")
-    df_vacio = pd.DataFrame({
-        "Va_Voltaje_Acelerador": [0.0] * 5,
-        "Ib_Corriente_Bobinas": [0.0] * 5,
-        "Parametro_Geometrico": [0.0] * 5
-    })
+    
+    # --- LÓGICA DINÁMICA DE COLUMNAS SEGÚN EXPERIMENTO Y EQUIPO ---
+    col_param = None
+    if "1000617" in equipo:
+        if experimento == "Balance de Campos":
+            col_voltaje = "Vp_Voltaje_Potenciador"
+            df_vacio = pd.DataFrame({
+                col_voltaje: [0.0] * 5,
+                "Ib_Corriente_Bobinas": [0.0] * 5
+            })
+        elif experimento == "Deflexión de Campos":
+            col_voltaje = "Va_Voltaje_Anodo"
+            col_param = "R_Radio_Curvatura"
+            df_vacio = pd.DataFrame({
+                col_voltaje: [0.0] * 5,
+                "Ib_Corriente_Bobinas": [0.0] * 5,
+                col_param: [0.0] * 5
+            })
+        else: # Fuente para mínimo balance de campos
+            col_voltaje = "Vp_Voltaje_Potenciador"
+            col_param = "R_Radio_Curvatura"
+            df_vacio = pd.DataFrame({
+                col_voltaje: [0.0] * 5,
+                "Ib_Corriente_Bobinas": [0.0] * 5,
+                col_param: [0.0] * 5
+            })
+    elif "PASCO" in equipo:
+        col_voltaje = "Va_Voltaje_Acelerador"
+        col_param = "R_Radio_Circunferencia"
+        df_vacio = pd.DataFrame({
+            col_voltaje: [0.0] * 5,
+            "Ib_Corriente_Bobinas": [0.0] * 5,
+            col_param: [0.0] * 5
+        })
+    else: # Doble Cañón y cualquier otro futuro
+        col_voltaje = "Va_Voltaje_Acelerador"
+        col_param = "Parametro_Geometrico"
+        df_vacio = pd.DataFrame({
+            col_voltaje: [0.0] * 5,
+            "Ib_Corriente_Bobinas": [0.0] * 5,
+            col_param: [0.0] * 5
+        })
+        
     df_vacio.index = range(1, len(df_vacio) + 1)
     df_vacio.index.name = "Dato N°"
     
     df_editado = st.data_editor(df_vacio, num_rows="dynamic", use_container_width=True)
     
     if st.button("Procesar Lote y Guardar", type="primary"):
-        df_validos = df_editado[df_editado["Va_Voltaje_Acelerador"] > 0].copy()
+        df_validos = df_editado[df_editado[col_voltaje] > 0].copy()
         
         if df_validos.empty:
-            st.warning("Debe ingresar al menos una medición válida (con Va > 0) para procesar.")
+            st.warning(f"Debe ingresar al menos una medición válida (con {col_voltaje} > 0) para procesar.")
         else:
             valor_teorico = 1.758820e11 # C/kg
             
@@ -168,12 +152,15 @@ with tab1:
                 lambda row: calcular_em(row, equipo, experimento), axis=1
             )
             
-            # 3. Propagación de Error Instrumental para cada medición
-            termino_v = (delta_v / df_validos['Va_Voltaje_Acelerador'])**2
+            # --- PROPAGACIÓN DE ERROR DINÁMICA ---
+            termino_v = (delta_v / df_validos[col_voltaje])**2
             termino_i = (2 * delta_i / df_validos['Ib_Corriente_Bobinas'])**2
-            termino_r = (2 * delta_r / df_validos['Parametro_Geometrico'])**2
             
-            df_validos['Error_Instrumental'] = df_validos['e_m_Calculado'] * np.sqrt(termino_v + termino_i + termino_r)
+            if col_param and col_param in df_validos.columns:
+                termino_r = (2 * delta_r / df_validos[col_param])**2
+                df_validos['Error_Instrumental'] = df_validos['e_m_Calculado'] * np.sqrt(termino_v + termino_i + termino_r)
+            else:
+                df_validos['Error_Instrumental'] = df_validos['e_m_Calculado'] * np.sqrt(termino_v + termino_i)
             
             # 4. Cálculos Estadísticos del Lote
             em_promedio = df_validos['e_m_Calculado'].mean()
@@ -194,24 +181,29 @@ with tab1:
                 col_res3.metric(label="Error % Promedio", value=f"{error_porcentual_promedio:.2f} %", delta="Desviación Alta", delta_color="inverse")
             
             st.markdown("#### Detalle de Propagación Instrumental")
-            st.dataframe(df_validos[['Va_Voltaje_Acelerador', 'Ib_Corriente_Bobinas', 'Parametro_Geometrico', 'e_m_Calculado', 'Error_Instrumental']], use_container_width=True)
+            columnas_mostrar = [col for col in [col_voltaje, 'Ib_Corriente_Bobinas', col_param, 'e_m_Calculado', 'Error_Instrumental'] if col and col in df_validos.columns]
+            st.dataframe(df_validos[columnas_mostrar], use_container_width=True)
             
             # GUARDADO EN GOOGLE SHEETS
             df_existente = conn.read()
             
             filas_para_guardar = []
             for index, row in df_validos.iterrows():
+                # Emparejamiento seguro para guardar en la base de datos general
+                guardar_voltaje_acelerador = row.get('Va_Voltaje_Acelerador') or row.get('Va_Voltaje_Anodo', np.nan)
+                guardar_parametro = row.get('Parametro_Geometrico') or row.get('R_Radio_Curvatura') or row.get('R_Radio_Circunferencia', np.nan)
+                
                 filas_para_guardar.append({
                     "Fecha_Ingreso": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "Correo": st.session_state.correo,
                     "Integrantes": integrantes,
                     "Equipo": equipo.split(" - ")[1],
                     "Vf_Voltaje_Filamento": np.nan,
-                    "Va_Voltaje_Acelerador": row['Va_Voltaje_Acelerador'],
-                    "Vp_Voltaje_Placas": np.nan,
+                    "Va_Voltaje_Acelerador": guardar_voltaje_acelerador,
+                    "Vp_Voltaje_Placas": row.get('Vp_Voltaje_Potenciador', np.nan),
                     "Vb_Voltaje_Bobinas": np.nan,
                     "Ib_Corriente_Bobinas": row['Ib_Corriente_Bobinas'],
-                    "Parametro_Geometrico": row['Parametro_Geometrico'],
+                    "Parametro_Geometrico": guardar_parametro,
                     "e_m_Calculado": row['e_m_Calculado'],
                     "Error_Porcentual": error_porcentual_promedio,
                     "Observaciones": f"Lote. Err Inst: ±{row['Error_Instrumental']:.2e}"
@@ -231,10 +223,10 @@ with tab2:
     try:
         df = conn.read()
         
-        if 'Va_Voltaje_Acelerador' in df.columns:
-            df = df.dropna(subset=['Va_Voltaje_Acelerador'])
-        elif 'Voltaje_Acelerador' in df.columns: 
-            df = df.dropna(subset=['Voltaje_Acelerador'])
+        # Filtro robusto para verificar si existen columnas de voltaje guardadas
+        cols_voltaje = [c for c in ['Va_Voltaje_Acelerador', 'Voltaje_Acelerador', 'Vp_Voltaje_Placas', 'Va_Voltaje_Anodo'] if c in df.columns]
+        if cols_voltaje:
+            df = df.dropna(subset=cols_voltaje, how='all')
             
         if not df.empty and len(df) > 0:
             st.success(f"Conexión exitosa: Se cargaron {len(df)} mediciones históricas.")
