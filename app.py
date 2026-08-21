@@ -476,10 +476,12 @@ with tab1:
                     else:
                         col_res3.metric(label="Error % Lote", value=f"{err_lote:.2f} %", delta="Desviación Alta", delta_color="inverse")
                     
-                    # 4. Guardar en Base de Datos Google Sheets (con ttl=0 para evitar caché de fantasmas)
+                    # 4. Guardar en Base de Datos Google Sheets
+                    # ¡OPCIÓN NUCLEAR! Forzamos el vaciado de la memoria caché
+                    st.cache_data.clear() 
                     df_existente = conn.read(ttl=0)
-                    filas_para_guardar = []
                     
+                    filas_para_guardar = []
                     for index, row in df_validos.iterrows():
                         nueva_fila_dict = {
                             "ID_Medicion": f"MED-{uuid.uuid4().hex[:12]}",
@@ -492,7 +494,6 @@ with tab1:
                             "Error_Porcentual": err_lote,
                             "Observaciones": f"Lote ({metodo}). e/m: {em_lote:.2e} ± {em_std:.2e}"
                         }
-                        # Adjuntar los datos puros medidos
                         for campo in df_editado.columns:
                             nueva_fila_dict[campo] = row[campo]
                             
@@ -502,6 +503,9 @@ with tab1:
                     df_actualizado = pd.concat([df_existente, df_nuevas_filas], ignore_index=True)
                     
                     conn.update(worksheet="Sheet1", data=df_actualizado)
+                    
+                    # Limpiamos la caché de nuevo después de guardar para que el dashboard no lea datos viejos
+                    st.cache_data.clear() 
                     st.info("Datos del lote respaldados en la base institucional de Google Sheets.")
 
 # --- PESTAÑA 2: DASHBOARD DE ANÁLISIS ---
