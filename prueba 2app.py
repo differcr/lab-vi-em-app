@@ -402,7 +402,12 @@ st.title("Laboratorio: Estimación e/m")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 tab1, tab2 = st.tabs(["Módulo de Adquisición", "Dashboard de Análisis"])
-
+# Diccionario con las rutas de las imágenes (ajusta los nombres a los de tus archivos)
+imagenes_equipos = {
+    "PASCO SE-9629": "pasco_se9629.jpg",         # Reemplaza con la ruta o URL real
+    "TELTRON TEL 2534": "teltron_2534.jpg",      # Reemplaza con la ruta o URL real
+    "TELTRON Tipo S 1000617": "teltron_thomson.jpg" # Reemplaza con la ruta o URL real
+}
 # --- PESTAÑA 1: MÓDULO DE ADQUISICIÓN ---
 with tab1:
     st.header("Ingreso de Mediciones")
@@ -414,7 +419,10 @@ with tab1:
         experimento_seleccionado = st.selectbox("Seleccione Experimento", experimentos_disponibles)
 
         campos = protocolo_adquisicion[equipo_seleccionado]["experimentos"][experimento_seleccionado]["campos_requeridos"]
-
+        try:
+            st.image(imagenes_equipos[equipo_seleccionado], caption=f"Montaje: {equipo_seleccionado}", width=400)
+        except Exception as e:
+            st.info("Sube la imagen del equipo al repositorio para visualizarla aquí.")
         with st.form("formulario_ingreso"):
             st.subheader("Datos Generales")
             correo = st.text_input("Correo Institucional", value=st.session_state['correo'], disabled=True)
