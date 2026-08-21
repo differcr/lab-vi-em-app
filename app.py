@@ -459,31 +459,43 @@ with tab2:
 
     if st.button("Actualizar y Analizar Datos"):
         df_raw = conn.read()
-        df_raw = df_raw.dropna(subset=['Equipo'])
 
-        if not df_raw.empty:
-            df_valido = limpiar_base_datos(df_raw)
-            st.subheader("Datos Procesados (Filtrados)")
-            st.dataframe(df_valido)
+        # FIX #10: validación defensiva de columnas esperadas. Si la hoja
+        # de Google Sheets está vacía, recién creada, o le falta alguna
+        # columna clave (por ejemplo 'Experimento'), antes esto producía
+        # un KeyError sin explicación. Ahora se detecta y se avisa.
+        columnas_requeridas = ["Equipo", "Experimento"]
+        columnas_faltantes = [c for c in columnas_requeridas if c not in df_raw.columns]
 
-            st.subheader("Análisis por Equipo")
-            equipos_presentes = df_valido['Equipo'].unique()
-
-            for eq in equipos_presentes:
-                st.write(f"### Equipo: {eq}")
-                experimentos_eq = df_valido[df_valido['Equipo'] == eq]['Experimento'].unique()
-
-                for exp in experimentos_eq:
-                    st.write(f"**Experimento:** {exp}")
-                    em, incerteza, fig = analisis_regresion_equipo(df_valido, eq, exp)
-
-                    if fig:
-                        st.pyplot(fig)
-                        error_perc = np.abs((em - EM_TEORICO) / EM_TEORICO) * 100
-                        st.metric(label="Error Porcentual (vs Teórico)", value=f"{error_perc:.2f}%")
-                        # FIX #9b: se libera la figura de matplotlib tras
-                        # mostrarla, para no acumular memoria en sesiones
-                        # largas del dashboard.
-                        plt.close(fig)
+        if df_raw.empty or columnas_faltantes:
+            st.info(
+                "Aún no hay datos históricos válidos para analizar. "
+                + (f"Faltan las columnas: {', '.join(columnas_faltantes)}. " if columnas_faltantes else "")
+                + "Ingresa al menos una medición en la pestaña 'Módulo de Adquisición' primero."
+            )
         else:
-            st.info("Aún no hay datos históricos para analizar.")
+            df_raw = df_raw.dropna(subset=['Equipo'])
+
+            if not df_raw.empty:
+                df_valido = limpiar_base_datos(df_raw)
+                st.subheader("Datos Procesados (Filtrados)")
+                st.dataframe(df_valido)
+
+                st.subheader("Análisis por Equipo")
+                equipos_presentes = df_valido['Equipo'].unique()
+
+                for eq in equipos_presentes:
+                    st.write(f"### Equipo: {eq}")
+                    experimentos_eq = df_valido[df_valido['Equipo'] == eq]['Experimento'].unique()
+
+                    for exp in experimentos_eq:
+                        st.write(f"**Experimento:** {exp}")
+                        em, incerteza, fig = analisis_regresion_equipo(df_valido, eq, exp)
+
+                        if fig:
+                            st.pyplot(fig)
+                            error_perc = np.abs((em - EM_TEORICO) / EM_TEORICO) * 100
+                            st.metric(label="Error Porcentual (vs Teórico)", value=f"{error_perc:.2f}%")
+                            plt.close(fig)
+            else:
+                st.info("Aún no hay datos históricos para analizar.")
