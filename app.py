@@ -111,22 +111,36 @@ protocolo_adquisicion = {
             }
         }
     },
+    # FIX #12: reestructurado por completo según la guía oficial del TEL 2534
+    # (Teltron Limited / traducción USACH). El equipo tiene, en realidad, TRES
+    # configuraciones de medición distintas, cada una con su propia geometría
+    # para calcular R — no dos experimentos genéricos "Axial"/"Perpendicular"
+    # con un solo campo "Distancia" como estaba antes.
     "TELTRON TEL 2534": {
         "experimentos": {
-            "B.16 e/m con Cañon Axial": {
+            "Punto A - Cañon Axial (anillo lejano AA')": {
                 "campos_requeridos": [
-                    {"nombre": "Va_Voltaje_Acelerador", "unidad": "V", "tipo": "float", "rango_valido": (80, 150)},
-                    {"nombre": "Vp_Voltaje_Placas_Enfoque", "unidad": "V", "tipo": "float", "rango_valido": (0, 6)},
+                    {"nombre": "Va_Voltaje_Acelerador", "unidad": "V", "tipo": "float", "rango_valido": (0, 300), "descripcion": "Típico 80-140V según guía"},
                     {"nombre": "Ih_Corriente_Bobinas", "unidad": "A", "tipo": "float", "rango_valido": (0, 3)},
-                    {"nombre": "Distancia_EE", "unidad": "mm", "tipo": "float", "descripcion": "Distancia entre anillos fundidos"}
+                    {"nombre": "Vp_Voltaje_Placas_Enfoque", "unidad": "V", "tipo": "float", "rango_valido": (0, 6), "descripcion": "Solo para enfocar el haz, no entra en la fórmula"},
+                    {"nombre": "Distancia_AE_mm", "unidad": "mm", "tipo": "float", "descripcion": "Distancia axial medida entre anillos AA' y EE' (nominal 80mm)", "valor_defecto": 80.0},
+                    {"nombre": "Diametro_AA_mm", "unidad": "mm", "tipo": "float", "descripcion": "Diámetro medido del anillo AA' (nominal 102mm)", "valor_defecto": 102.0}
                 ]
             },
-            "B.16 e/m con Cañon Perpendicular": {
+            "Punto E - Cañon Axial (anillo cercano EE')": {
                 "campos_requeridos": [
-                    {"nombre": "Va_Voltaje_Acelerador", "unidad": "V", "tipo": "float", "rango_valido": (80, 150)},
-                    {"nombre": "Vp_Voltaje_Placas_Enfoque", "unidad": "V", "tipo": "float", "rango_valido": (0, 6)},
+                    {"nombre": "Va_Voltaje_Acelerador", "unidad": "V", "tipo": "float", "rango_valido": (0, 300), "descripcion": "Típico 80-140V según guía"},
                     {"nombre": "Ih_Corriente_Bobinas", "unidad": "A", "tipo": "float", "rango_valido": (0, 3)},
-                    {"nombre": "Distancia_AA", "unidad": "mm", "tipo": "float", "descripcion": "Diámetro del anillo"}
+                    {"nombre": "Vp_Voltaje_Placas_Enfoque", "unidad": "V", "tipo": "float", "rango_valido": (0, 6), "descripcion": "Solo para enfocar el haz, no entra en la fórmula"},
+                    {"nombre": "Diametro_EE_mm", "unidad": "mm", "tipo": "float", "descripcion": "Diámetro medido del anillo EE' (nominal 102mm)", "valor_defecto": 102.0}
+                ]
+            },
+            "Perpendicular - anillo AA'": {
+                "campos_requeridos": [
+                    {"nombre": "Va_Voltaje_Acelerador", "unidad": "V", "tipo": "float", "rango_valido": (0, 300), "descripcion": "Típico 100-140V según guía"},
+                    {"nombre": "Ih_Corriente_Bobinas", "unidad": "A", "tipo": "float", "rango_valido": (0, 3)},
+                    {"nombre": "Vp_Voltaje_Placas_Enfoque", "unidad": "V", "tipo": "float", "rango_valido": (0, 6), "descripcion": "Solo para enfocar el haz, no entra en la fórmula"},
+                    {"nombre": "Distancia_AE_mm", "unidad": "mm", "tipo": "float", "descripcion": "Distancia axial medida entre anillos AA' y EE' (nominal 80mm), usada como R=AE/2", "valor_defecto": 80.0}
                 ]
             }
         }
@@ -164,28 +178,33 @@ def calcular_r_geom_thomson(c_mm, a_mm):
     return (c ** 2 + a ** 2) / (2 * a)
 
 
-def calcular_r_geom_doble_canon(x_mm, y_mm):
-    x = x_mm / 1000
-    y = y_mm / 1000
-    return (x ** 2 + y ** 2) / (2 * y)
-
-
-# FIX #2: función explícita para calcular el radio de curvatura del TEL 2534
-# a partir de la distancia medida (Distancia_EE o Distancia_AA) y el
-# diámetro fijo del tubo D=0.138 m, usando la misma fórmula de sagita que
-# ya se usaba para el equipo Thomson (Tipo S). Antes esta columna
-# "R_Calculado_m" no existía en ningún lado y el código caía siempre a un
-# valor hardcodeado de 0.05 m, invalidando el resultado.
+# FIX #12: reemplaza la anterior calcular_r_geom_tel2534 (que asumía,
+# incorrectamente, la misma geometría genérica del tubo Thomson usando el
+# diámetro fijo de las bobinas D=0.138m). Según la guía oficial del TEL 2534
+# ("The Principle of Pythagoras and the Fused Rings AA' and EE'", ec. 16.03),
+# el radio de curvatura R se calcula distinto según el punto de referencia:
 #
-# NOTA IMPORTANTE: se asume que la geometría de Distancia_EE/Distancia_AA
-# respecto al diámetro D sigue el mismo modelo de sagita (r = (c²+a²)/(2a))
-# usado en el tubo Thomson. Verifica esta fórmula contra el protocolo/guía
-# específica de tu profesor para el TEL 2534 antes de usar los resultados
-# en el informe — si el manual da otra relación geométrica, reemplaza esta
-# función en consecuencia.
-def calcular_r_geom_tel2534(distancia_mm, equipo_nombre):
-    D_mm = equipos_parametros[equipo_nombre]["D"] * 1000
-    return calcular_r_geom_thomson(distancia_mm, D_mm)
+# - Punto A (cañón axial, anillo lejano AA'): x = AE + 2mm (el haz emerge
+#   ~2mm antes del anillo EE'), y = AA'/2 → R = (x²+y²)/(2y)
+# - Punto E (cañón axial, anillo cercano EE'): x = 2mm (offset fijo,
+#   la distancia AE no aplica aquí), y = EE'/2 → R = (x²+y²)/(2y)
+# - Perpendicular (anillo AA'): R = AE/2 (ecuación 16.18 de la guía,
+#   geometría distinta porque el cañón perpendicular genera un círculo
+#   completo, no un arco)
+def calcular_R_tel2534_punto_axial(distancia_ae_mm, diametro_anillo_mm):
+    x_mm = distancia_ae_mm + 2.0
+    y_mm = diametro_anillo_mm / 2.0
+    return calcular_r_geom_thomson(x_mm, y_mm)
+
+
+def calcular_R_tel2534_punto_E(diametro_ee_mm):
+    x_mm = 2.0
+    y_mm = diametro_ee_mm / 2.0
+    return calcular_r_geom_thomson(x_mm, y_mm)
+
+
+def calcular_R_tel2534_perpendicular(distancia_ae_mm):
+    return (distancia_ae_mm / 1000) / 2
 
 
 # =============================================================================
@@ -308,26 +327,36 @@ def analisis_regresion_equipo(df_limpio, equipo_nombre, experimento=None):
     incerteza_ajuste = res.stderr
 
     if equipo_nombre == "TELTRON TEL 2534":
-        # FIX #2: se calcula R_Calculado_m fila a fila a partir de la
-        # distancia medida (Distancia_EE o Distancia_AA), en vez de usar
-        # el valor hardcodeado 0.05.
+        # FIX #12: R ya no se promedia con una fórmula genérica; se calcula
+        # fila a fila según el punto de referencia (A, E o Perpendicular),
+        # siguiendo exactamente la geometría de la guía oficial.
         radios = []
         for _, row in datos.iterrows():
-            dist = row.get('Distancia_EE')
-            if pd.isna(dist) or dist is None:
-                dist = row.get('Distancia_AA')
-            dist = pd.to_numeric(dist, errors='coerce')
-            if not pd.isna(dist):
-                radios.append(calcular_r_geom_tel2534(dist, equipo_nombre))
+            if experimento == "Punto A - Cañon Axial (anillo lejano AA')":
+                ae = pd.to_numeric(row.get('Distancia_AE_mm'), errors='coerce')
+                d_aa = pd.to_numeric(row.get('Diametro_AA_mm'), errors='coerce')
+                if pd.isna(ae) or pd.isna(d_aa) or d_aa == 0:
+                    continue
+                radios.append(calcular_R_tel2534_punto_axial(ae, d_aa))
+            elif experimento == "Punto E - Cañon Axial (anillo cercano EE')":
+                d_ee = pd.to_numeric(row.get('Diametro_EE_mm'), errors='coerce')
+                if pd.isna(d_ee) or d_ee == 0:
+                    continue
+                radios.append(calcular_R_tel2534_punto_E(d_ee))
+            elif experimento == "Perpendicular - anillo AA'":
+                ae = pd.to_numeric(row.get('Distancia_AE_mm'), errors='coerce')
+                if pd.isna(ae):
+                    continue
+                radios.append(calcular_R_tel2534_perpendicular(ae))
+
         if radios:
             R_medio = np.mean(radios)
         else:
-            st.warning("No se encontró 'Distancia_EE'/'Distancia_AA' válida; no se puede calcular R para TEL 2534.")
+            st.warning("No hay mediciones geométricas válidas (distancia AE / diámetro de anillo) para calcular R en TEL 2534.")
             return None, None, None
 
-        # FIX #5: el factor ya no es el número mágico hardcodeado 1.15e5;
-        # se deriva de k_B, que vive en equipos_parametros y queda
-        # sincronizado si algún día cambia.
+        # El factor ya no es el número mágico hardcodeado 1.15e5; se deriva
+        # de k_B (equipos_parametros), quedando sincronizado si cambia.
         k_B = equipos_parametros[equipo_nombre]["k_B"]
         factor = 2 / (k_B ** 2)
         em_experimental = pendiente * (factor / (R_medio ** 2))
@@ -407,18 +436,26 @@ with tab1:
                     if campo["tipo"] == "float":
                         # FIX #7: ahora se pasa también max_value cuando hay
                         # rango_valido definido, en vez de solo el mínimo.
-                        # Antes un valor absurdamente alto (ej. 50000 V en
-                        # un campo con rango 2000-5000) se aceptaba sin
-                        # ninguna advertencia.
+                        # FIX #13: soporte para "valor_defecto" (precarga los
+                        # valores nominales de fábrica, ej. AE=80mm, anillo=102mm
+                        # según la guía del TEL 2534), para que el usuario solo
+                        # tenga que ajustarlo si su medición real difiere.
+                        valor_defecto = campo.get("valor_defecto")
                         if "rango_valido" in campo:
                             min_val = float(campo["rango_valido"][0])
                             max_val = float(campo["rango_valido"][1])
                             label += f" (rango válido: {min_val}–{max_val})"
                             valores_ingresados[nombre] = st.number_input(
-                                label, min_value=min_val, max_value=max_val, format="%.4f"
+                                label, min_value=min_val, max_value=max_val,
+                                value=float(valor_defecto) if valor_defecto is not None else min_val,
+                                format="%.4f"
                             )
                         else:
-                            valores_ingresados[nombre] = st.number_input(label, format="%.4f")
+                            valores_ingresados[nombre] = st.number_input(
+                                label,
+                                value=float(valor_defecto) if valor_defecto is not None else 0.0,
+                                format="%.4f"
+                            )
 
             submit = st.form_submit_button("Guardar Medición")
 
