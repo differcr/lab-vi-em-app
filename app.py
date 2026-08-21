@@ -514,7 +514,8 @@ with tab2:
 
     if st.button("Actualizar y Analizar Datos"):
         df_raw = conn.read(ttl=0) # ttl=0 forza la descarga de los datos frescos, olvidando borrados
-
+        st.cache_data.clear() 
+        df_raw = conn.read(ttl=0)
         if df_raw.empty or 'Equipo' not in df_raw.columns:
             st.info("Aún no hay datos históricos válidos para analizar. Ingresa al menos una medición primero.")
         else:
