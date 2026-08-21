@@ -424,43 +424,36 @@ with tab1:
         st.markdown("---")
         st.subheader("Tabla de Datos Experimentales")
         
-        # Generar DataFrame vacío dinámicamente según el experimento seleccionado
         campos = protocolo_adquisicion[equipo_seleccionado]["experimentos"][experimento_seleccionado]["campos_requeridos"]
         columnas_dinamicas = {campo["nombre"]: [float(campo.get("valor_defecto", 0.0))] * 5 for campo in campos}
         df_vacio = pd.DataFrame(columnas_dinamicas)
         df_vacio.index = range(1, len(df_vacio) + 1)
         
-        # El usuario edita los datos directamente
         df_editado = st.data_editor(df_vacio, num_rows="dynamic", use_container_width=True)
 
         if st.button("Procesar Lote y Guardar", type="primary"):
-            # Encontrar qué columna almacena el voltaje acelerador o ánodo
             col_voltaje = [c for c in df_editado.columns if "Voltaje" in c][0]
             
-            # Filtrar mediciones válidas
             df_validos = df_editado[df_editado[col_voltaje] > 0].copy()
             
             if df_validos.empty:
                 st.warning("Debe ingresar al menos una medición válida para procesar.")
             else:
-                # 1. Calcular e/m fila por fila
                 df_validos['e_m_Calculado'] = df_validos.apply(
                     lambda row: calcular_em_fila(row, equipo_seleccionado, experimento_seleccionado), axis=1
                 )
                 
-                # Descartar filas que dieron error matemático en el cálculo
                 df_validos = df_validos.dropna(subset=['e_m_Calculado'])
                 df_validos = df_validos[df_validos['e_m_Calculado'] > 0]
                 
                 if df_validos.empty:
                     st.warning("Las mediciones ingresadas no son suficientes o viables para calcular e/m.")
                 else:
-                    # 2. Propagación de error (Aproximación simplificada instrumental fila a fila)
                     termino_v = (delta_v / df_validos[col_voltaje])**2
                     termino_i = (2 * delta_i / df_validos['Ih_Corriente_Bobinas'])**2
                     df_validos['Error_Instrumental'] = df_validos['e_m_Calculado'] * np.sqrt(termino_v + termino_i)
                     
-                    # 3. Estadísticas del lote (VOLVEMOS AL PROMEDIO PARA EVITAR PENDIENTES ROTAS)
+                    # PROMEDIO ESTADÍSTICO RESTAURADO
                     em_lote = df_validos['e_m_Calculado'].mean()
                     em_std = df_validos['e_m_Calculado'].std() if len(df_validos) > 1 else 0.0
                     err_lote = np.abs((em_lote - EM_TEORICO) / EM_TEORICO) * 100
@@ -476,12 +469,15 @@ with tab1:
                     else:
                         col_res3.metric(label="Error % Lote", value=f"{err_lote:.2f} %", delta="Desviación Alta", delta_color="inverse")
                     
-                    # 4. Guardar en Base de Datos Google Sheets
-                    # ¡OPCIÓN NUCLEAR! Forzamos el vaciado de la memoria caché
-                    st.cache_data.clear() 
-                    df_existente = conn.read(ttl=0)
-                    
+                    # ==== ¡AQUÍ ESTÁ EL CAMBIO CLAVE! worksheet="Datos_Lab" ====
+                    try:
+                        df_existente = conn.read(worksheet="Datos_Lab", ttl=0)
+                    except Exception:
+                        # Si es la primera vez y la hoja está completamente vacía, creamos un DataFrame vacío
+                        df_existente = pd.DataFrame()
+                        
                     filas_para_guardar = []
+                    
                     for index, row in df_validos.iterrows():
                         nueva_fila_dict = {
                             "ID_Medicion": f"MED-{uuid.uuid4().hex[:12]}",
@@ -500,88 +496,64 @@ with tab1:
                         filas_para_guardar.append(nueva_fila_dict)
                     
                     df_nuevas_filas = pd.DataFrame(filas_para_guardar)
-                    df_actualizado = pd.concat([df_existente, df_nuevas_filas], ignore_index=True)
+                    if not df_existente.empty:
+                        df_actualizado = pd.concat([df_existente, df_nuevas_filas], ignore_index=True)
+                    else:
+                        df_actualizado = df_nuevas_filas
                     
-                    conn.update(worksheet="Sheet1", data=df_actualizado)
-                    
-                    # Limpiamos la caché de nuevo después de guardar para que el dashboard no lea datos viejos
-                    st.cache_data.clear() 
-                    st.info("Datos del lote respaldados en la base institucional de Google Sheets.")
+                    conn.update(worksheet="Datos_Lab", data=df_actualizado)
+                    st.cache_data.clear() # Vaciamos cualquier rastro final en memoria
+                    st.info("Datos guardados en la nueva pestaña 'Datos_Lab'. ¡Adiós datos fantasma!")
 
 # --- PESTAÑA 2: DASHBOARD DE ANÁLISIS ---
 with tab2:
     st.header("Análisis Histórico y Regresión")
 
     if st.button("Actualizar y Analizar Datos"):
-        df_raw = conn.read(ttl=0) # ttl=0 forza la descarga de los datos frescos, olvidando borrados
-        st.cache_data.clear() 
-        df_raw = conn.read(ttl=0)
-        if df_raw.empty or 'Equipo' not in df_raw.columns:
-            st.info("Aún no hay datos históricos válidos para analizar. Ingresa al menos una medición primero.")
-        else:
-            df_raw = df_raw.dropna(subset=['Equipo'])
-            es_legado = df_raw['ID_Medicion'].isna() | (df_raw['ID_Medicion'].astype(str).str.strip() == '') if 'ID_Medicion' in df_raw.columns else pd.Series(True, index=df_raw.index)
+        try:
+            # ==== ¡AQUÍ TAMBIÉN! worksheet="Datos_Lab" ====
+            df_raw = conn.read(worksheet="Datos_Lab", ttl=0)
 
-            df_nuevo = df_raw[~es_legado].copy()
-
-            # === GRÁFICO DERIVA TEMPORAL ===
-            st.subheader("Evolución Temporal: Error Porcentual por Equipo")
-            if not df_nuevo.empty and 'Error_Porcentual' in df_nuevo.columns:
-                df_plot = df_nuevo.dropna(subset=['Error_Porcentual']).copy()
-                df_plot['Fecha_Ingreso'] = pd.to_datetime(df_plot['Fecha_Ingreso'])
-                df_plot['Error_Porcentual'] = pd.to_numeric(df_plot['Error_Porcentual'])
-                
-                # Gráfico interactivo separando los colores por Equipo
-                st.scatter_chart(data=df_plot, x='Fecha_Ingreso', y='Error_Porcentual', color='Equipo')
+            if df_raw.empty or 'Equipo' not in df_raw.columns:
+                st.info("Aún no hay datos históricos válidos en 'Datos_Lab'. Ingresa al menos una medición primero.")
             else:
-                st.info("No hay datos nuevos con error porcentual calculado para graficar la deriva.")
+                df_raw = df_raw.dropna(subset=['Equipo'])
+                df_nuevo = df_raw.copy()
 
-            st.markdown("---")
+                # === GRÁFICO DERIVA TEMPORAL ===
+                st.subheader("Evolución Temporal: Error Porcentual por Equipo")
+                if not df_nuevo.empty and 'Error_Porcentual' in df_nuevo.columns:
+                    df_plot = df_nuevo.dropna(subset=['Error_Porcentual']).copy()
+                    df_plot['Fecha_Ingreso'] = pd.to_datetime(df_plot['Fecha_Ingreso'])
+                    df_plot['Error_Porcentual'] = pd.to_numeric(df_plot['Error_Porcentual'])
+                    
+                    st.scatter_chart(data=df_plot, x='Fecha_Ingreso', y='Error_Porcentual', color='Equipo')
+                else:
+                    st.info("No hay datos nuevos con error porcentual calculado para graficar la deriva.")
 
-            # === ANÁLISIS DE REGRESIÓN ===
-            st.subheader("Análisis de Regresión: Mediciones Recientes")
-            if not df_nuevo.empty and 'Experimento' in df_nuevo.columns:
-                df_valido = limpiar_base_datos(df_nuevo)
+                st.markdown("---")
 
-                equipos_presentes = df_valido['Equipo'].unique()
-                for eq in equipos_presentes:
-                    st.write(f"### Equipo: {eq}")
-                    experimentos_eq = df_valido[df_valido['Equipo'] == eq]['Experimento'].dropna().unique()
+                # === ANÁLISIS DE REGRESIÓN ===
+                st.subheader("Análisis de Regresión: Mediciones Recientes")
+                if not df_nuevo.empty and 'Experimento' in df_nuevo.columns:
+                    df_valido = limpiar_base_datos(df_nuevo)
 
-                    for exp in experimentos_eq:
-                        st.write(f"**Experimento:** {exp}")
-                        em, incerteza, fig = analisis_regresion_equipo(df_valido, eq, exp)
+                    equipos_presentes = df_valido['Equipo'].unique()
+                    for eq in equipos_presentes:
+                        st.write(f"### Equipo: {eq}")
+                        experimentos_eq = df_valido[df_valido['Equipo'] == eq]['Experimento'].dropna().unique()
 
-                        if fig:
-                            st.pyplot(fig)
-                            error_perc = np.abs((em - EM_TEORICO) / EM_TEORICO) * 100
-                            st.metric(label="Error Porcentual (Ajuste vs Teórico)", value=f"{error_perc:.2f}%")
-                            plt.close(fig)
-            else:
-                st.info("Aún no hay mediciones con geometría registrada para análisis de regresión.")
-# =============================================================================
-# MÓDULO 5: ZONA DE ADMINISTRACIÓN (Formateo forzado)
-# =============================================================================
-st.sidebar.markdown("---")
-with st.sidebar.expander("🛠️ Zona de Administración (Peligro)"):
-    st.write("Usa este botón para borrar los datos fantasma a la fuerza.")
-    
-    if st.button("Formatear Base de Datos"):
-        # 1. Creamos una tabla completamente vacía pero con los nombres de columna correctos
-        columnas_base = [
-            "ID_Medicion", "Fecha_Ingreso", "Correo", "Integrantes", 
-            "Equipo", "Experimento", "Va_Voltaje_Acelerador", "Va_Voltaje_Anodo",
-            "Vp_Voltaje_Placas", "Vp_Voltaje_Placas_Enfoque", "Ih_Corriente_Bobinas", 
-            "r_Radio_Haz_mm", "Distancia_AE_mm", "Diametro_AA_mm", "Diametro_EE_mm",
-            "Distancia_L_Nula", "Coordenada_x", "Coordenada_y", 
-            "e_m_Calculado", "Error_Porcentual", "Observaciones"
-        ]
-        df_reset = pd.DataFrame(columns=columnas_base)
-        
-        # 2. Le ordenamos a la app que aplaste Google Sheets con esta tabla vacía
-        conn.update(worksheet="Sheet1", data=df_reset)
-        
-        # 3. Limpiamos cualquier rastro de memoria
-        st.cache_data.clear() 
-        
-        st.success("¡Base de datos aniquilada y formateada! Ve a la Pestaña 1 y haz un nuevo ingreso.")
+                        for exp in experimentos_eq:
+                            st.write(f"**Experimento:** {exp}")
+                            em, incerteza, fig = analisis_regresion_equipo(df_valido, eq, exp)
+
+                            if fig:
+                                st.pyplot(fig)
+                                error_perc = np.abs((em - EM_TEORICO) / EM_TEORICO) * 100
+                                st.metric(label="Error Porcentual (Ajuste vs Teórico)", value=f"{error_perc:.2f}%")
+                                plt.close(fig)
+                else:
+                    st.info("Aún no hay mediciones con geometría registrada para análisis de regresión.")
+                    
+        except Exception as e:
+            st.error("No se pudo encontrar la pestaña 'Datos_Lab'. Por favor, ve a Google Sheets y créala.")
