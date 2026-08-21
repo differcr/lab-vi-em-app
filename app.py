@@ -460,33 +460,50 @@ with tab2:
     if st.button("Actualizar y Analizar Datos"):
         df_raw = conn.read()
 
-        # FIX #10: validación defensiva de columnas esperadas. Si la hoja
-        # de Google Sheets está vacía, recién creada, o le falta alguna
-        # columna clave (por ejemplo 'Experimento'), antes esto producía
-        # un KeyError sin explicación. Ahora se detecta y se avisa.
-        columnas_requeridas = ["Equipo", "Experimento"]
-        columnas_faltantes = [c for c in columnas_requeridas if c not in df_raw.columns]
-
-        if df_raw.empty or columnas_faltantes:
+        if df_raw.empty or "Equipo" not in df_raw.columns:
             st.info(
                 "Aún no hay datos históricos válidos para analizar. "
-                + (f"Faltan las columnas: {', '.join(columnas_faltantes)}. " if columnas_faltantes else "")
-                + "Ingresa al menos una medición en la pestaña 'Módulo de Adquisición' primero."
+                "Ingresa al menos una medición en la pestaña 'Módulo de Adquisición' primero."
             )
         else:
             df_raw = df_raw.dropna(subset=['Equipo'])
 
-            if not df_raw.empty:
-                df_valido = limpiar_base_datos(df_raw)
-                st.subheader("Datos Procesados (Filtrados)")
+            # FIX #11: COMPATIBILIDAD CON EL FORMATO ANTERIOR.
+            # La versión anterior del código guardaba columnas distintas
+            # (Ib_Corriente_Bobinas, Parametro_Geometrico, e_m_Calculado,
+            # Error_Porcentual...) y nunca escribía 'ID_Medicion' ni
+            # 'Experimento'. Como ambas versiones escriben en la misma hoja
+            # ("Sheet1"), el dataframe leído puede traer una mezcla de filas
+            # viejas y nuevas.
+            #
+            # En vez de intentar traducir 'Parametro_Geometrico' al nuevo
+            # esquema geométrico (Distancia_EE/AA, Coordenada_x/y, etc.) —
+            # lo cual requeriría adivinar qué representaba ese campo en cada
+            # fila vieja, arriesgando resultados físicamente incorrectos —
+            # se identifican las filas "legado" (sin ID_Medicion) y se
+            # muestran usando el e/m que el código anterior YA calculó y
+            # guardó en su momento. No se recalcula nada para ellas.
+            if "ID_Medicion" in df_raw.columns:
+                es_legado = df_raw["ID_Medicion"].isna() | (df_raw["ID_Medicion"].astype(str).str.strip() == "")
+            else:
+                # Si la columna ni siquiera existe, todo lo que hay es legado.
+                es_legado = pd.Series(True, index=df_raw.index)
+
+            df_legado = df_raw[es_legado].copy()
+            df_nuevo = df_raw[~es_legado].copy()
+
+            # ---------------------------------------------------------
+            # SECCIÓN A: DATOS NUEVOS (formato con geometría registrada)
+            # ---------------------------------------------------------
+            st.subheader("Mediciones nuevas (con geometría registrada)")
+            if not df_nuevo.empty and "Experimento" in df_nuevo.columns:
+                df_valido = limpiar_base_datos(df_nuevo)
                 st.dataframe(df_valido)
 
-                st.subheader("Análisis por Equipo")
                 equipos_presentes = df_valido['Equipo'].unique()
-
                 for eq in equipos_presentes:
                     st.write(f"### Equipo: {eq}")
-                    experimentos_eq = df_valido[df_valido['Equipo'] == eq]['Experimento'].unique()
+                    experimentos_eq = df_valido[df_valido['Equipo'] == eq]['Experimento'].dropna().unique()
 
                     for exp in experimentos_eq:
                         st.write(f"**Experimento:** {exp}")
@@ -498,4 +515,48 @@ with tab2:
                             st.metric(label="Error Porcentual (vs Teórico)", value=f"{error_perc:.2f}%")
                             plt.close(fig)
             else:
+                st.info("Aún no hay mediciones en el formato nuevo.")
+
+            # ---------------------------------------------------------
+            # SECCIÓN B: DATOS HISTÓRICOS (formato de la versión anterior)
+            # ---------------------------------------------------------
+            if not df_legado.empty:
+                st.markdown("---")
+                st.subheader("Mediciones históricas (formato anterior)")
+                st.caption(
+                    "Estas filas fueron guardadas por una versión anterior de la app, con un "
+                    "esquema de columnas distinto. Se muestran con el valor de e/m que esa "
+                    "versión ya calculó y guardó — no se recalculan aquí, para no adivinar "
+                    "conversiones geométricas que podrían ser incorrectas."
+                )
+                st.dataframe(df_legado)
+
+                if "e_m_Calculado" in df_legado.columns:
+                    df_legado_num = df_legado.copy()
+                    df_legado_num["e_m_Calculado"] = pd.to_numeric(df_legado_num["e_m_Calculado"], errors="coerce")
+                    if "Error_Porcentual" in df_legado_num.columns:
+                        df_legado_num["Error_Porcentual"] = pd.to_numeric(df_legado_num["Error_Porcentual"], errors="coerce")
+
+                    df_legado_num = df_legado_num.dropna(subset=["e_m_Calculado"])
+                    df_legado_num = df_legado_num[df_legado_num["e_m_Calculado"] != 0]
+
+                    if not df_legado_num.empty:
+                        st.write("**Resumen estadístico por equipo (histórico):**")
+                        resumen = df_legado_num.groupby("Equipo").agg(
+                            n_mediciones=("e_m_Calculado", "count"),
+                            em_promedio=("e_m_Calculado", "mean"),
+                            em_std=("e_m_Calculado", "std"),
+                        )
+                        if "Error_Porcentual" in df_legado_num.columns:
+                            resumen["error_pct_promedio"] = df_legado_num.groupby("Equipo")["Error_Porcentual"].mean()
+                        st.dataframe(resumen)
+                    else:
+                        st.info("Las filas históricas no tienen valores de e/m calculados válidos para resumir.")
+                else:
+                    st.info(
+                        "Las filas históricas no tienen la columna 'e_m_Calculado', "
+                        "así que solo se muestran como tabla de referencia."
+                    )
+
+            if df_nuevo.empty and df_legado.empty:
                 st.info("Aún no hay datos históricos para analizar.")
