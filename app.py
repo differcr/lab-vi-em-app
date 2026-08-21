@@ -456,27 +456,110 @@ with tab1:
                 if df_validos.empty:
                     st.warning("Las mediciones ingresadas no son suficientes o viables para calcular e/m.")
                 else:
-                    # 2. Propagación de error (Aproximación simplificada instrumental)
+                    # 2. Propagación de error (Aproximación simplificada instrumental fila a fila)
                     termino_v = (delta_v / df_validos[col_voltaje])**2
                     termino_i = (2 * delta_i / df_validos['Ih_Corriente_Bobinas'])**2
                     df_validos['Error_Instrumental'] = df_validos['e_m_Calculado'] * np.sqrt(termino_v + termino_i)
                     
-                    df_validos['Error_Porcentual'] = np.abs((df_validos['e_m_Calculado'] - EM_TEORICO) / EM_TEORICO) * 100
+                    # =========================================================================
+                    # 3. ANÁLISIS DE REGRESIÓN PARA EL LOTE EN VEZ DE PROMEDIO
+                    # =========================================================================
+                    x_vals = []
+                    y_vals = []
                     
-                    # 3. Estadísticas del lote
-                    em_promedio = df_validos['e_m_Calculado'].mean()
-                    em_std = df_validos['e_m_Calculado'].std() if len(df_validos) > 1 else 0
-                    err_promedio = df_validos['Error_Porcentual'].mean()
-                    
-                    st.success(f"Se procesaron {len(df_validos)} mediciones exitosamente.")
-                    col_res1, col_res2, col_res3 = st.columns(3)
-                    col_res1.metric(label="e/m Promedio (x̄)", value=f"{em_promedio:.4e}")
-                    col_res2.metric(label="Desviación Estándar (σ)", value=f"± {em_std:.4e}")
-                    
-                    if err_promedio <= 15.0:
-                        col_res3.metric(label="Error % Promedio", value=f"{err_promedio:.2f} %", delta="Aceptable", delta_color="normal")
+                    for _, row in df_validos.iterrows():
+                        try:
+                            if equipo_seleccionado == "PASCO SE-9629":
+                                U = float(row.get('Va_Voltaje_Acelerador', 0))
+                                I = float(row.get('Ih_Corriente_Bobinas', 0))
+                                r = float(row.get('r_Radio_Haz_mm', 0)) / 1000.0
+                                B = calcular_campo_pasco(I, equipos_parametros[equipo_seleccionado]["R"], equipos_parametros[equipo_seleccionado]["N"])
+                                y_vals.append(2 * U)
+                                x_vals.append((B * r)**2)
+                                
+                            elif equipo_seleccionado == "TELTRON TEL 2534":
+                                U = float(row.get('Va_Voltaje_Acelerador', 0))
+                                I = float(row.get('Ih_Corriente_Bobinas', 0))
+                                y_vals.append(U)
+                                x_vals.append(I**2)
+                                
+                            elif equipo_seleccionado == "TELTRON Tipo S 1000617":
+                                if experimento_seleccionado == "Exp 2: Deflexion Magnetica Pura":
+                                    U = float(row.get('Va_Voltaje_Anodo', 0))
+                                    I = float(row.get('Ih_Corriente_Bobinas', 0))
+                                    c = float(row.get('Coordenada_x', 0))
+                                    a = float(row.get('Coordenada_y', 0))
+                                    r = calcular_r_geom_thomson(c, a)
+                                    B = equipos_parametros[equipo_seleccionado]["k_B"] * I
+                                    y_vals.append(2 * U)
+                                    x_vals.append((B * r)**2)
+                                    
+                                elif experimento_seleccionado == "Exp 1: Balance de Campos (Fuerza Nula)":
+                                    U = float(row.get('Va_Voltaje_Anodo', 0))
+                                    Vp = float(row.get('Vp_Voltaje_Placas', 0))
+                                    I = float(row.get('Ih_Corriente_Bobinas', 0))
+                                    d_mm = float(row.get('Distancia_L_Nula', 0))
+                                    d = d_mm / 1000.0
+                                    B = equipos_parametros[equipo_seleccionado]["k_B"] * I
+                                    E = Vp / d
+                                    y_vals.append(2 * U)
+                                    x_vals.append((E / B)**2)
+                        except Exception:
+                            continue
+
+                    # Extraer pendiente si hay 2 o más puntos
+                    if len(x_vals) >= 2:
+                        x_array = np.array(x_vals)
+                        y_array = np.array(y_vals)
+                        res = linregress(x_array, y_array)
+                        pendiente = res.slope
+                        incerteza_ajuste = res.stderr
+                        
+                        if equipo_seleccionado == "TELTRON TEL 2534":
+                            radios = []
+                            for _, row in df_validos.iterrows():
+                                if "Punto A" in experimento_seleccionado:
+                                    ae = float(row.get('Distancia_AE_mm', 80))
+                                    d_aa = float(row.get('Diametro_AA_mm', 102))
+                                    radios.append(calcular_R_tel2534_punto_axial(ae, d_aa))
+                                elif "Punto E" in experimento_seleccionado:
+                                    d_ee = float(row.get('Diametro_EE_mm', 102))
+                                    radios.append(calcular_R_tel2534_punto_E(d_ee))
+                                elif "Perpendicular" in experimento_seleccionado:
+                                    ae = float(row.get('Distancia_AE_mm', 80))
+                                    radios.append(calcular_R_tel2534_perpendicular(ae))
+                            R_medio = np.mean(radios) if radios else 0.05
+                            k_B = equipos_parametros[equipo_seleccionado]["k_B"]
+                            factor = 2 / (k_B**2)
+                            em_lote = pendiente * (factor / (R_medio**2))
+                            em_std = incerteza_ajuste * (factor / (R_medio**2))
+                            
+                        elif equipo_seleccionado == "TELTRON Tipo S 1000617" and experimento_seleccionado == "Exp 1: Balance de Campos (Fuerza Nula)":
+                            em_lote = 1.0 / pendiente
+                            em_std = incerteza_ajuste / (pendiente**2)
+                        else:
+                            em_lote = pendiente
+                            em_std = incerteza_ajuste
+                            
+                        metodo = "Regresión Lineal"
                     else:
-                        col_res3.metric(label="Error % Promedio", value=f"{err_promedio:.2f} %", delta="Desviación Alta", delta_color="inverse")
+                        # Si solo meten 1 dato, usamos el e/m puntual como salvavidas
+                        em_lote = df_validos['e_m_Calculado'].iloc[0] if not df_validos.empty else 0.0
+                        em_std = 0.0
+                        metodo = "Medición Única"
+
+                    err_lote = np.abs((em_lote - EM_TEORICO) / EM_TEORICO) * 100
+                    # =========================================================================
+                    
+                    st.success(f"Se procesaron {len(df_validos)} mediciones utilizando {metodo}.")
+                    col_res1, col_res2, col_res3 = st.columns(3)
+                    col_res1.metric(label="e/m Lote (Pendiente)", value=f"{em_lote:.4e}")
+                    col_res2.metric(label="Error Std (Ajuste)", value=f"± {em_std:.4e}")
+                    
+                    if err_lote <= 15.0:
+                        col_res3.metric(label="Error % Lote", value=f"{err_lote:.2f} %", delta="Aceptable", delta_color="normal")
+                    else:
+                        col_res3.metric(label="Error % Lote", value=f"{err_lote:.2f} %", delta="Desviación Alta", delta_color="inverse")
                     
                     # 4. Guardar en Base de Datos Google Sheets
                     df_existente = conn.read()
@@ -490,9 +573,9 @@ with tab1:
                             "Integrantes": integrantes,
                             "Equipo": equipo_seleccionado,
                             "Experimento": experimento_seleccionado,
-                            "e_m_Calculado": row['e_m_Calculado'],
-                            "Error_Porcentual": row['Error_Porcentual'],
-                            "Observaciones": f"Lote. Err Inst: ±{row['Error_Instrumental']:.2e}"
+                            "e_m_Calculado": row['e_m_Calculado'], # Mantiene el puntual para gráficos de puntos
+                            "Error_Porcentual": err_lote,          # Asigna el error global de la regresión a toda la tanda
+                            "Observaciones": f"Lote ({metodo}). e/m: {em_lote:.2e} ± {em_std:.2e}"
                         }
                         # Adjuntar los datos puros medidos
                         for campo in df_editado.columns:
