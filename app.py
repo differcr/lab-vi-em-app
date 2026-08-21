@@ -559,3 +559,29 @@ with tab2:
                             plt.close(fig)
             else:
                 st.info("Aún no hay mediciones con geometría registrada para análisis de regresión.")
+# =============================================================================
+# MÓDULO 5: ZONA DE ADMINISTRACIÓN (Formateo forzado)
+# =============================================================================
+st.sidebar.markdown("---")
+with st.sidebar.expander("🛠️ Zona de Administración (Peligro)"):
+    st.write("Usa este botón para borrar los datos fantasma a la fuerza.")
+    
+    if st.button("Formatear Base de Datos"):
+        # 1. Creamos una tabla completamente vacía pero con los nombres de columna correctos
+        columnas_base = [
+            "ID_Medicion", "Fecha_Ingreso", "Correo", "Integrantes", 
+            "Equipo", "Experimento", "Va_Voltaje_Acelerador", "Va_Voltaje_Anodo",
+            "Vp_Voltaje_Placas", "Vp_Voltaje_Placas_Enfoque", "Ih_Corriente_Bobinas", 
+            "r_Radio_Haz_mm", "Distancia_AE_mm", "Diametro_AA_mm", "Diametro_EE_mm",
+            "Distancia_L_Nula", "Coordenada_x", "Coordenada_y", 
+            "e_m_Calculado", "Error_Porcentual", "Observaciones"
+        ]
+        df_reset = pd.DataFrame(columns=columnas_base)
+        
+        # 2. Le ordenamos a la app que aplaste Google Sheets con esta tabla vacía
+        conn.update(worksheet="Sheet1", data=df_reset)
+        
+        # 3. Limpiamos cualquier rastro de memoria
+        st.cache_data.clear() 
+        
+        st.success("¡Base de datos aniquilada y formateada! Ve a la Pestaña 1 y haz un nuevo ingreso.")
