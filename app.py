@@ -454,22 +454,43 @@ with tab1:
                     df_validos['Error_Instrumental'] = df_validos['e_m_Calculado'] * np.sqrt(termino_v + termino_i)
                     
                     # PROMEDIO ESTADÍSTICO RESTAURADO
-                    em_lote = df_validos['e_m_Calculado'].mean()
-                    em_std = df_validos['e_m_Calculado'].std() if len(df_validos) > 1 else 0.0
+                    # --- NUEVO CÁLCULO MEDIANTE REGRESIÓN LINEAL ---
+                    # 1. Preparamos el dataframe para que sea compatible con tu función
+                    df_validos['Equipo'] = equipo_seleccionado
+                    df_validos['Experimento'] = experimento_seleccionado
+                    
+                    # 2. Llamamos a la función de regresión (requiere mínimo 3 datos)
+                    em_lote, em_std, fig = analisis_regresion_equipo(df_validos, equipo_seleccionado, experimento_seleccionado)
+                    
+                    if em_lote is None:
+                        st.error("Error: Se requieren al menos 3 mediciones válidas en el lote para realizar un ajuste de regresión lineal.")
+                        st.stop() # Detiene la ejecución para no guardar datos erróneos
+                    
+                    # 3. Calculamos el error porcentual en base a la regresión
                     err_lote = np.abs((em_lote - EM_TEORICO) / EM_TEORICO) * 100
-                    metodo = "Promedio Estadístico"
+                    metodo = "Regresión Lineal"
                     
                     st.success(f"Se procesaron {len(df_validos)} mediciones exitosamente mediante {metodo}.")
+                    
+                    # 4. Mostramos las métricas actualizadas
                     col_res1, col_res2, col_res3 = st.columns(3)
-                    col_res1.metric(label="e/m Lote (Promedio)", value=f"{em_lote:.4e}")
-                    col_res2.metric(label="Desviación Std (σ)", value=f"± {em_std:.4e}")
+                    col_res1.metric(label="e/m Lote (Pendiente)", value=f"{em_lote:.4e}")
+                    col_res2.metric(label="Error Std de Ajuste", value=f"± {em_std:.4e}")
+                    
+                    if err_lote <= 15.0:
+                        col_res3.metric(label="Error % Lote", value=f"{err_lote:.2f} %", delta="Aceptable", delta_color="normal")
+                    else:
+                        col_res3.metric(label="Error % Lote", value=f"{err_lote:.2f} %", delta="Desviación Alta", delta_color="inverse")
+                        
+                    # 5. ¡Mostramos el gráfico en vivo 
+                    st.pyplot(fig)
                     
                     if err_lote <= 15.0:
                         col_res3.metric(label="Error % Lote", value=f"{err_lote:.2f} %", delta="Aceptable", delta_color="normal")
                     else:
                         col_res3.metric(label="Error % Lote", value=f"{err_lote:.2f} %", delta="Desviación Alta", delta_color="inverse")
                     
-                    # ==== ¡AQUÍ ESTÁ EL CAMBIO CLAVE! worksheet="Datos_Lab" ====
+                
                     try:
                         df_existente = conn.read(worksheet="Datos_Lab", ttl=0)
                     except Exception:
@@ -511,7 +532,7 @@ with tab2:
 
     if st.button("Actualizar y Analizar Datos"):
         try:
-            # ==== ¡AQUÍ TAMBIÉN! worksheet="Datos_Lab" ====
+            
             df_raw = conn.read(worksheet="Datos_Lab", ttl=0)
 
             if df_raw.empty or 'Equipo' not in df_raw.columns:
