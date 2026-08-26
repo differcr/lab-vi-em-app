@@ -505,8 +505,7 @@ with tab1:
                     
                     conn.update(worksheet="Datos_Lab", data=df_actualizado)
                     st.cache_data.clear() # Vaciamos cualquier rastro final en memoria
-                    st.info("Datos guardados en la nueva pestaña 'Datos_Lab'. ¡Adiós datos fantasma!")
-
+                  
 # --- PESTAÑA 2: DASHBOARD DE ANÁLISIS ---
 with tab2:
     st.header("Análisis Histórico y Regresión")
