@@ -113,23 +113,72 @@ def df_con_unidades(df):
         return df
     return df.rename(columns={c: etiqueta_con_unidad(c) for c in df.columns})
 
-MARCADORES_EQUIPO = {
-    "PASCO SE-9629": "o",
-    "TELTRON TEL 2534": "s",
-    "TELTRON Tipo S 1000617": "^",
+FORMAS_ALTAIR_EQUIPO = {
+    "PASCO SE-9629": "circle",
+    "TELTRON TEL 2534": "square",
+    "TELTRON Tipo S 1000617": "triangle-up",
 }
-COLORES_EQUIPO = {
-    "PASCO SE-9629": "tab:blue",
-    "TELTRON TEL 2534": "tab:orange",
-    "TELTRON Tipo S 1000617": "tab:green",
+COLORES_ALTAIR_EQUIPO = {
+    "PASCO SE-9629": "#1f77b4",
+    "TELTRON TEL 2534": "#ff7f0e",
+    "TELTRON Tipo S 1000617": "#2ca02c",
 }
-MARCADORES_EXTRA = ["D", "P", "X", "v", "*", "h", "p", ">"]
-COLORES_EXTRA = ["tab:red", "tab:purple", "tab:brown", "tab:pink", "tab:gray", "tab:olive", "tab:cyan"]
+FORMAS_ALTAIR_EXTRA = ["diamond", "cross", "triangle-down", "triangle-right", "wedge", "arrow"]
+COLORES_ALTAIR_EXTRA = ["#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]
 
-def estilo_equipo(nombre_equipo, indice=0):
-    marcador = MARCADORES_EQUIPO.get(nombre_equipo, MARCADORES_EXTRA[indice % len(MARCADORES_EXTRA)])
-    color = COLORES_EQUIPO.get(nombre_equipo, COLORES_EXTRA[indice % len(COLORES_EXTRA)])
-    return marcador, color
+def escalas_visuales_equipo(equipos):
+    domain, formas, colores = [], [], []
+    extra_i = 0
+    for eq in equipos:
+        domain.append(eq)
+        if eq in FORMAS_ALTAIR_EQUIPO:
+            formas.append(FORMAS_ALTAIR_EQUIPO[eq])
+            colores.append(COLORES_ALTAIR_EQUIPO[eq])
+        else:
+            formas.append(FORMAS_ALTAIR_EXTRA[extra_i % len(FORMAS_ALTAIR_EXTRA)])
+            colores.append(COLORES_ALTAIR_EXTRA[extra_i % len(COLORES_ALTAIR_EXTRA)])
+            extra_i += 1
+    return domain, formas, colores
+
+def mostrar_grafico_error_interactivo(df, titulo, legend=True):
+    df_chart = df.copy()
+    df_chart["Equipo"] = df_chart["Equipo"].astype(str)
+    equipos = list(df_chart["Equipo"].dropna().unique())
+    domain, formas, colores = escalas_visuales_equipo(equipos)
+
+    tooltips = [
+        {"field": "Fecha_Ingreso", "type": "temporal", "title": "Fecha de ingreso"},
+        {"field": "Error_Porcentual", "type": "quantitative", "title": "Error porcentual [%]", "format": ".2f"},
+        {"field": "Equipo", "type": "nominal", "title": "Equipo"},
+    ]
+    if "Experimento" in df_chart.columns:
+        tooltips.append({"field": "Experimento", "type": "nominal", "title": "Experimento"})
+    if "e_m_Calculado" in df_chart.columns:
+        tooltips.append({"field": "e_m_Calculado", "type": "quantitative", "title": "e/m [C/kg]", "format": ".3e"})
+
+    spec = {
+        "title": titulo,
+        "height": 360,
+        "mark": {"type": "point", "filled": True, "size": 90},
+        "encoding": {
+            "x": {"field": "Fecha_Ingreso", "type": "temporal", "title": "Fecha de ingreso"},
+            "y": {"field": "Error_Porcentual", "type": "quantitative", "title": "Error porcentual [%]"},
+            "color": {
+                "field": "Equipo",
+                "type": "nominal",
+                "scale": {"domain": domain, "range": colores},
+                "legend": {"title": "Equipo"} if legend else None,
+            },
+            "shape": {
+                "field": "Equipo",
+                "type": "nominal",
+                "scale": {"domain": domain, "range": formas},
+                "legend": {"title": "Símbolo"} if legend else None,
+            },
+            "tooltip": tooltips,
+        },
+    }
+    st.vega_lite_chart(df_chart, spec, use_container_width=True)
 
 def column_config_con_unidades(campos):
     config = {}
@@ -425,21 +474,45 @@ def analisis_regresion_equipo(df_limpio, equipo_nombre, experimento=None):
     return em_experimental, incerteza_final, fig
 
 def generar_grafico_regresion(x, y, res, titulo, em_val, error):
-    fig, ax = plt.subplots(figsize=(9, 6))
-    ax.scatter(x, y, color='darkblue', alpha=0.7, label='Datos Filtrados')
-    ax.plot(x, res.intercept + res.slope * x, 'r--', label=f'Ajuste Lineal (R²={res.rvalue**2:.3f})')
-    ax.set_title(f'Estimación e/m: {titulo}')
-    ax.set_xlabel('Variable Independiente (Teórica)')
-    ax.set_ylabel('Variable Dependiente (Teórica)')
-
-    texto_res = f"e/m exp: {em_val:.3e} {EM_TEORICO_UNIDAD}\nError Std: ±{error:.3e} {EM_TEORICO_UNIDAD}"
-    ax.text(0.05, 0.95, texto_res, transform=ax.transAxes, fontsize=11,
-            verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.9))
-
-    ax.legend()
-    ax.grid(True, linestyle=':', alpha=0.6)
-    fig.tight_layout()
-    return fig
+    df_pts = pd.DataFrame({
+        "x": list(x),
+        "y": list(y),
+        "serie": ["Datos filtrados"] * len(x),
+    })
+    x_line = np.linspace(np.min(x), np.max(x), 80) if len(x) else np.array([])
+    df_line = pd.DataFrame({
+        "x": list(x_line),
+        "y": list(res.intercept + res.slope * x_line),
+        "serie": [f"Ajuste lineal (R²={res.rvalue**2:.3f})"] * len(x_line),
+    })
+    df_chart = pd.concat([df_pts, df_line], ignore_index=True)
+    spec = {
+        "title": f"Estimación e/m: {titulo} | e/m exp: {em_val:.3e} ± {error:.3e} {EM_TEORICO_UNIDAD}",
+        "height": 360,
+        "layer": [
+            {
+                "data": {"values": df_pts.to_dict("records")},
+                "mark": {"type": "point", "filled": True, "size": 80, "color": "#1f4e79"},
+                "encoding": {
+                    "x": {"field": "x", "type": "quantitative", "title": "Variable Independiente (Teórica)"},
+                    "y": {"field": "y", "type": "quantitative", "title": "Variable Dependiente (Teórica)"},
+                    "tooltip": [
+                        {"field": "x", "type": "quantitative", "title": "x", "format": ".4g"},
+                        {"field": "y", "type": "quantitative", "title": "y", "format": ".4g"},
+                    ],
+                },
+            },
+            {
+                "data": {"values": df_line.to_dict("records")},
+                "mark": {"type": "line", "color": "red", "strokeDash": [6, 4]},
+                "encoding": {
+                    "x": {"field": "x", "type": "quantitative"},
+                    "y": {"field": "y", "type": "quantitative"},
+                },
+            },
+        ],
+    }
+    return {"data": df_chart, "spec": spec}
 
 # =============================================================================
 # APLICACIÓN PRINCIPAL
@@ -613,63 +686,25 @@ with tab2:
                     df_plot['Error_Porcentual'] = pd.to_numeric(df_plot['Error_Porcentual'])
                     
                     equipos_unicos = list(df_plot["Equipo"].dropna().astype(str).unique())
-                    fig_gen, ax_gen = plt.subplots(figsize=(10, 5.5))
-                    for i, eq in enumerate(equipos_unicos):
-                        df_eq = df_plot[df_plot["Equipo"].astype(str) == eq].sort_values("Fecha_Ingreso")
-                        if df_eq.empty:
-                            continue
-                        marcador, color = estilo_equipo(eq, i)
-                        ax_gen.scatter(
-                            df_eq["Fecha_Ingreso"],
-                            df_eq["Error_Porcentual"],
-                            marker=marcador,
-                            color=color,
-                            s=70,
-                            alpha=0.85,
-                            label=eq,
-                            zorder=3,
-                        )
-                    ax_gen.set_title("Error porcentual vs tiempo (todos los equipos)")
-                    ax_gen.set_xlabel("Fecha de ingreso")
-                    ax_gen.set_ylabel("Error porcentual [%]")
-                    ax_gen.grid(True, linestyle=":", alpha=0.6)
-                    ax_gen.legend(title="Equipo")
-                    fig_gen.autofmt_xdate()
-                    fig_gen.tight_layout()
-                    st.pyplot(fig_gen)
-                    plt.close(fig_gen)
+                    mostrar_grafico_error_interactivo(
+                        df_plot,
+                        "Error porcentual vs tiempo (todos los equipos)",
+                        legend=True,
+                    )
 
                     # Gráfico de error porcentual vs tiempo, uno por equipo
                     st.markdown("---")
                     st.subheader("Error porcentual en el tiempo por equipo")
-                    st.caption("Cada gráfico muestra Error_Porcentual [%] frente a Fecha_Ingreso para un equipo.")
-                    for i, eq in enumerate(equipos_unicos):
+                    st.caption("Cada gráfico es interactivo (zoom, paneo y tooltip) y usa el símbolo propio del equipo.")
+                    for eq in equipos_unicos:
                         df_eq = df_plot[df_plot["Equipo"].astype(str) == eq].sort_values("Fecha_Ingreso")
                         if df_eq.empty:
                             continue
-                        marcador, color = estilo_equipo(eq, i)
-                        fig_eq, ax_eq = plt.subplots(figsize=(9, 4.5))
-                        ax_eq.scatter(
-                            df_eq["Fecha_Ingreso"],
-                            df_eq["Error_Porcentual"],
-                            marker=marcador,
-                            color=color,
-                            s=70,
-                            alpha=0.85,
-                            label=eq,
-                            zorder=3,
+                        mostrar_grafico_error_interactivo(
+                            df_eq,
+                            f"{eq}: Error porcentual vs tiempo",
+                            legend=False,
                         )
-                        if len(df_eq) >= 2:
-                            ax_eq.plot(df_eq["Fecha_Ingreso"], df_eq["Error_Porcentual"], color=color, alpha=0.45)
-                        ax_eq.set_title(f"{eq}: Error porcentual vs tiempo")
-                        ax_eq.set_xlabel("Fecha de ingreso")
-                        ax_eq.set_ylabel("Error porcentual [%]")
-                        ax_eq.grid(True, linestyle=":", alpha=0.6)
-                        ax_eq.legend()
-                        fig_eq.autofmt_xdate()
-                        fig_eq.tight_layout()
-                        st.pyplot(fig_eq)
-                        plt.close(fig_eq)
                 else:
                     st.info("No hay datos con error porcentual calculado para graficar la deriva.")
 
