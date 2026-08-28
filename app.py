@@ -113,6 +113,24 @@ def df_con_unidades(df):
         return df
     return df.rename(columns={c: etiqueta_con_unidad(c) for c in df.columns})
 
+MARCADORES_EQUIPO = {
+    "PASCO SE-9629": "o",
+    "TELTRON TEL 2534": "s",
+    "TELTRON Tipo S 1000617": "^",
+}
+COLORES_EQUIPO = {
+    "PASCO SE-9629": "tab:blue",
+    "TELTRON TEL 2534": "tab:orange",
+    "TELTRON Tipo S 1000617": "tab:green",
+}
+MARCADORES_EXTRA = ["D", "P", "X", "v", "*", "h", "p", ">"]
+COLORES_EXTRA = ["tab:red", "tab:purple", "tab:brown", "tab:pink", "tab:gray", "tab:olive", "tab:cyan"]
+
+def estilo_equipo(nombre_equipo, indice=0):
+    marcador = MARCADORES_EQUIPO.get(nombre_equipo, MARCADORES_EXTRA[indice % len(MARCADORES_EXTRA)])
+    color = COLORES_EQUIPO.get(nombre_equipo, COLORES_EXTRA[indice % len(COLORES_EXTRA)])
+    return marcador, color
+
 def column_config_con_unidades(campos):
     config = {}
     for campo in campos:
@@ -594,25 +612,60 @@ with tab2:
                     df_plot['Fecha_Ingreso'] = pd.to_datetime(df_plot['Fecha_Ingreso'])
                     df_plot['Error_Porcentual'] = pd.to_numeric(df_plot['Error_Porcentual'])
                     
-                    st.scatter_chart(data=df_plot, x='Fecha_Ingreso', y='Error_Porcentual', color='Equipo')
+                    equipos_unicos = list(df_plot["Equipo"].dropna().astype(str).unique())
+                    fig_gen, ax_gen = plt.subplots(figsize=(10, 5.5))
+                    for i, eq in enumerate(equipos_unicos):
+                        df_eq = df_plot[df_plot["Equipo"].astype(str) == eq].sort_values("Fecha_Ingreso")
+                        if df_eq.empty:
+                            continue
+                        marcador, color = estilo_equipo(eq, i)
+                        ax_gen.scatter(
+                            df_eq["Fecha_Ingreso"],
+                            df_eq["Error_Porcentual"],
+                            marker=marcador,
+                            color=color,
+                            s=70,
+                            alpha=0.85,
+                            label=eq,
+                            zorder=3,
+                        )
+                    ax_gen.set_title("Error porcentual vs tiempo (todos los equipos)")
+                    ax_gen.set_xlabel("Fecha de ingreso")
+                    ax_gen.set_ylabel("Error porcentual [%]")
+                    ax_gen.grid(True, linestyle=":", alpha=0.6)
+                    ax_gen.legend(title="Equipo")
+                    fig_gen.autofmt_xdate()
+                    fig_gen.tight_layout()
+                    st.pyplot(fig_gen)
+                    plt.close(fig_gen)
 
                     # Gráfico de error porcentual vs tiempo, uno por equipo
                     st.markdown("---")
                     st.subheader("Error porcentual en el tiempo por equipo")
                     st.caption("Cada gráfico muestra Error_Porcentual [%] frente a Fecha_Ingreso para un equipo.")
-                    equipos_unicos = list(df_plot["Equipo"].dropna().astype(str).unique())
-                    for eq in equipos_unicos:
+                    for i, eq in enumerate(equipos_unicos):
                         df_eq = df_plot[df_plot["Equipo"].astype(str) == eq].sort_values("Fecha_Ingreso")
                         if df_eq.empty:
                             continue
+                        marcador, color = estilo_equipo(eq, i)
                         fig_eq, ax_eq = plt.subplots(figsize=(9, 4.5))
-                        ax_eq.scatter(df_eq["Fecha_Ingreso"], df_eq["Error_Porcentual"], color="darkblue", alpha=0.75)
+                        ax_eq.scatter(
+                            df_eq["Fecha_Ingreso"],
+                            df_eq["Error_Porcentual"],
+                            marker=marcador,
+                            color=color,
+                            s=70,
+                            alpha=0.85,
+                            label=eq,
+                            zorder=3,
+                        )
                         if len(df_eq) >= 2:
-                            ax_eq.plot(df_eq["Fecha_Ingreso"], df_eq["Error_Porcentual"], color="steelblue", alpha=0.5)
+                            ax_eq.plot(df_eq["Fecha_Ingreso"], df_eq["Error_Porcentual"], color=color, alpha=0.45)
                         ax_eq.set_title(f"{eq}: Error porcentual vs tiempo")
                         ax_eq.set_xlabel("Fecha de ingreso")
                         ax_eq.set_ylabel("Error porcentual [%]")
                         ax_eq.grid(True, linestyle=":", alpha=0.6)
+                        ax_eq.legend()
                         fig_eq.autofmt_xdate()
                         fig_eq.tight_layout()
                         st.pyplot(fig_eq)
