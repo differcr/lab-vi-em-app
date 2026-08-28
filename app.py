@@ -975,7 +975,7 @@ with tab2:
 
                     st.markdown("---")
                     st.subheader("Evolución Temporal: Error Porcentual por lote")
-                    st.caption(f"Cada punto es un lote. La línea roja discontinua marca el umbral de {UMBRAL_ERROR_PCT:.0f} %.")
+                    st.caption(f"La línea roja discontinua marca el umbral de {UMBRAL_ERROR_PCT:.0f} %.")
 
                     if "Error_Porcentual" not in df_limpio.columns:
                         st.info("No hay datos con error porcentual calculado para graficar la deriva.")
