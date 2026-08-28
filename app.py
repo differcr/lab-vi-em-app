@@ -143,11 +143,13 @@ def escalas_visuales_equipo(equipos):
 def mostrar_grafico_error_interactivo(df, titulo, legend=True):
     df_chart = df.copy()
     df_chart["Equipo"] = df_chart["Equipo"].astype(str)
+    df_chart["Fecha_Ingreso"] = pd.to_datetime(df_chart["Fecha_Ingreso"], errors="coerce")
+    df_chart["Fecha"] = df_chart["Fecha_Ingreso"].dt.normalize()
     equipos = list(df_chart["Equipo"].dropna().unique())
     domain, formas, colores = escalas_visuales_equipo(equipos)
 
     tooltips = [
-        {"field": "Fecha_Ingreso", "type": "temporal", "title": "Fecha de ingreso"},
+        {"field": "Fecha", "type": "temporal", "title": "Fecha", "format": "%d/%m/%Y"},
         {"field": "Error_Porcentual", "type": "quantitative", "title": "Error porcentual [%]", "format": ".2f"},
         {"field": "Equipo", "type": "nominal", "title": "Equipo"},
     ]
@@ -161,7 +163,13 @@ def mostrar_grafico_error_interactivo(df, titulo, legend=True):
         "height": 360,
         "mark": {"type": "point", "filled": True, "size": 90},
         "encoding": {
-            "x": {"field": "Fecha_Ingreso", "type": "temporal", "title": "Fecha de ingreso"},
+            "x": {
+                "field": "Fecha",
+                "type": "temporal",
+                "timeUnit": "yearmonthdate",
+                "title": "Fecha",
+                "axis": {"format": "%d/%m/%Y", "labelAngle": -35},
+            },
             "y": {"field": "Error_Porcentual", "type": "quantitative", "title": "Error porcentual [%]"},
             "color": {
                 "field": "Equipo",
