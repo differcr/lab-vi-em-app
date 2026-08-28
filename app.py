@@ -540,7 +540,7 @@ tab1, tab2 = st.tabs(["Módulo de Adquisición", "Dashboard de Análisis"])
 
 imagenes_equipos = {
     "PASCO SE-9629": "pasco_se9629.jpg",
-    "TELTRON TEL 2534": "teltron_2534.jpg",
+    "TELTRON TEL 2534": "teltron_2534.png",
     "TELTRON Tipo S 1000617": "teltron_thomson.jpg"
 }
 
@@ -626,7 +626,7 @@ with tab1:
                     else:
                         col_res3.metric(label="Error % Lote [%]", value=f"{err_lote:.2f} %", delta="Desviación Alta", delta_color="inverse")
 
-                    st.markdown("**Mediciones del lote (con unidades)**")
+                    st.markdown("**Mediciones del lote**")
                     st.dataframe(df_con_unidades(df_validos), use_container_width=True)
                     
                 
@@ -681,7 +681,7 @@ with tab2:
 
                 # === 1. TABLA GENERAL DE DATOS ===
                 st.subheader("Base de Datos Experimental")
-                st.markdown("Registro histórico de todas las mediciones ingresadas por los grupos de laboratorio. Las columnas numéricas se muestran con su símbolo de unidad.")
+                st.markdown("Registro histórico de todas las mediciones ingresadas por los grupos de laboratorio.")
                 st.dataframe(df_con_unidades(df_nuevo), use_container_width=True)
 
                 st.markdown("---")
@@ -703,7 +703,7 @@ with tab2:
                     # Gráfico de error porcentual vs tiempo, uno por equipo
                     st.markdown("---")
                     st.subheader("Error porcentual en el tiempo por equipo")
-                    st.caption("Cada gráfico es interactivo (zoom, paneo y tooltip) y usa el símbolo propio del equipo.")
+
                     for eq in equipos_unicos:
                         df_eq = df_plot[df_plot["Equipo"].astype(str) == eq].sort_values("Fecha_Ingreso")
                         if df_eq.empty:
