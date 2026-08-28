@@ -501,12 +501,20 @@ def fila_en_rango(row, campos):
 # MÓDULO 2: SISTEMA DE ALERTAS Y LIMPIEZA LÓGICA (SOFT DELETION)
 # =============================================================================
 
+def _pandas_nativo(df):
+    """Quita dtypes Arrow de Streamlit/Sheets, que rompen al mezclar NaN con texto."""
+    if df is None or (hasattr(df, "empty") and df.empty):
+        return pd.DataFrame()
+    datos = {}
+    for col in df.columns:
+        datos[str(col)] = list(df[col].tolist())
+    return pd.DataFrame(datos)
+
+
 def leer_hoja(conn, worksheet):
     try:
         df = conn.read(worksheet=worksheet, ttl=0)
-        if df is None:
-            return pd.DataFrame()
-        return df
+        return _pandas_nativo(df)
     except Exception:
         return pd.DataFrame()
 
@@ -536,18 +544,42 @@ def limpiar_base_datos(df, df_anulaciones=None):
     return df[~invalida].copy()
 
 
+def _texto_limpio(serie):
+    def _uno(valor):
+        if valor is None or (isinstance(valor, float) and np.isnan(valor)):
+            return ""
+        texto = str(valor).strip()
+        if texto.lower() in {"", "nan", "none", "<na>"}:
+            return ""
+        return texto
+    return serie.map(_uno)
+
+
 def asegurar_id_lote(df):
     df = df.copy()
-    if "ID_Lote" not in df.columns:
-        df["ID_Lote"] = np.nan
-    mask = df["ID_Lote"].isna() | (df["ID_Lote"].astype(str).str.strip().isin(["", "nan", "None"]))
-    claves = []
-    for col in ["Fecha_Ingreso", "Correo", "Equipo", "Experimento"]:
-        if col in df.columns:
-            claves.append(df[col].astype(str))
-        else:
-            claves.append(pd.Series([""] * len(df), index=df.index))
-    df.loc[mask, "ID_Lote"] = "LEG-" + claves[0][mask] + "|" + claves[1][mask] + "|" + claves[2][mask] + "|" + claves[3][mask]
+    n = len(df)
+
+    def col_txt(nombre):
+        if nombre not in df.columns:
+            return pd.Series([""] * n, index=df.index)
+        return _texto_limpio(df[nombre])
+
+    if "ID_Lote" in df.columns:
+        existentes = col_txt("ID_Lote")
+    else:
+        existentes = pd.Series([""] * n, index=df.index)
+
+    legado = (
+        "LEG-"
+        + col_txt("Fecha_Ingreso")
+        + "|"
+        + col_txt("Correo")
+        + "|"
+        + col_txt("Equipo")
+        + "|"
+        + col_txt("Experimento")
+    )
+    df["ID_Lote"] = [ex if ex else lg for ex, lg in zip(existentes.tolist(), legado.tolist())]
     return df
 
 
@@ -555,25 +587,32 @@ def agregar_por_lote(df):
     if df is None or df.empty:
         return pd.DataFrame()
     df = asegurar_id_lote(df)
-    df["Error_Porcentual"] = pd.to_numeric(df.get("Error_Porcentual"), errors="coerce")
-    df["e_m_Calculado"] = pd.to_numeric(df.get("e_m_Calculado"), errors="coerce")
-    agg = {
-        "Fecha_Ingreso": "first",
-        "Equipo": "first",
-        "Error_Porcentual": "first",
-        "e_m_Calculado": "mean",
-    }
-    if "Experimento" in df.columns:
-        agg["Experimento"] = "first"
-    if "Correo" in df.columns:
-        agg["Correo"] = "first"
-    if "e_m_Lote" in df.columns:
-        agg["e_m_Lote"] = "first"
-    agrupado = df.groupby("ID_Lote", dropna=False).agg(agg).reset_index()
-    conteo = df.groupby("ID_Lote", dropna=False).size().rename("n_mediciones")
+    if "Error_Porcentual" in df.columns:
+        df["Error_Porcentual"] = pd.to_numeric(df["Error_Porcentual"], errors="coerce")
+    else:
+        df["Error_Porcentual"] = np.nan
+    if "e_m_Calculado" in df.columns:
+        df["e_m_Calculado"] = pd.to_numeric(df["e_m_Calculado"], errors="coerce")
+    else:
+        df["e_m_Calculado"] = np.nan
+
+    usados = ["Fecha_Ingreso", "Equipo", "Error_Porcentual", "e_m_Calculado"]
+    opcionales = ["Experimento", "Correo", "e_m_Lote"]
+    agg = {}
+    for col in usados + opcionales:
+        if col not in df.columns:
+            continue
+        agg[col] = "mean" if col == "e_m_Calculado" else "first"
+
+    agrupado = df.groupby(df["ID_Lote"].astype(str), dropna=False).agg(agg).reset_index()
+    if "index" in agrupado.columns and "ID_Lote" not in agrupado.columns:
+        agrupado = agrupado.rename(columns={"index": "ID_Lote"})
+    conteo = df.groupby(df["ID_Lote"].astype(str), dropna=False).size().reset_index(name="n_mediciones")
+    conteo = conteo.rename(columns={conteo.columns[0]: "ID_Lote"})
     agrupado = agrupado.merge(conteo, on="ID_Lote", how="left")
     if "e_m_Lote" in agrupado.columns:
-        agrupado["e_m_Calculado"] = pd.to_numeric(agrupado["e_m_Lote"], errors="coerce").fillna(agrupado["e_m_Calculado"])
+        lote_num = pd.to_numeric(agrupado["e_m_Lote"], errors="coerce")
+        agrupado["e_m_Calculado"] = lote_num.fillna(pd.to_numeric(agrupado["e_m_Calculado"], errors="coerce"))
     return agrupado
 
 
